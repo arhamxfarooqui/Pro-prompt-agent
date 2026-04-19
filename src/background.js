@@ -5,6 +5,8 @@
  * individually unit-tested without touching Chrome APIs.
  */
 
+import { detectWebGPUSupport } from './utils/SystemCheck.js';
+
 // ──────────────────────────────────────────────
 // Exported Handlers (fully testable in isolation)
 // ──────────────────────────────────────────────
@@ -15,12 +17,16 @@
  *
  * @param {chrome.runtime.InstalledDetails} details
  */
-export function handleInstalled(details) {
+export async function handleInstalled(details) {
   console.log('[Orchestrator] Service worker installed.', {
     reason: details.reason,
     version: chrome.runtime.getManifest?.().version ?? '0.1.0',
     timestamp: Date.now(),
   });
+
+  // Run hardware diagnostics immediately on install.
+  const hardware = await detectWebGPUSupport();
+  console.log('[Orchestrator] Hardware mode resolved:', hardware.mode);
 }
 
 /**

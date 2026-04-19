@@ -10,13 +10,16 @@ import { handleInstalled, handleMessage } from '../src/background.js';
 
 describe('handleInstalled (unit)', () => {
   let logSpy;
+  let warnSpy;
 
   beforeEach(() => {
-    logSpy = jest.spyOn(console, 'log');
+    logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
     logSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it('should log a structured initialisation message', () => {
