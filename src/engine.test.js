@@ -1,89 +1,90 @@
 import { jest } from '@jest/globals';
 
-// We must use unstable_mockModule for Native ESM environment BEFORE importing the system under test
 const mockEngine = {
   chat: {
     completions: {
       create: jest.fn().mockResolvedValue({
-        choices: [
-          {
-            message: {
-              content: 'Mocked dummy response'
-            }
-          }
-        ]
+        choices: [{
+          message: { content: 'Mocked dummy response' }
+        }]
       })
     }
-  }
+  },
+  setInitProgressCallback: jest.fn(),
+  reload: jest.fn().mockResolvedValue(undefined)
 };
 
-const CreateMLCEngineMock = jest.fn().mockResolvedValue(mockEngine);
+const MLCEngineMock = jest.fn().mockImplementation(() => mockEngine);
 
 jest.unstable_mockModule('@mlc-ai/web-llm', () => {
   return {
-    CreateMLCEngine: CreateMLCEngineMock
+    MLCEngine: MLCEngineMock
   };
 });
 
-// Dynamically import to ensure modules are required AFTER the mock is configured
-const { initializeLLM, LocalWebLLMBridge } = await import('./engine.js');
+const { LLMManager, LocalWebLLMBridge } = await import('./engine.js');
 const { SystemMessage, HumanMessage, AIMessage } = await import('@langchain/core/messages');
-const { CreateMLCEngine } = await import('@mlc-ai/web-llm');
+const { MLCEngine } = await import('@mlc-ai/web-llm');
 
 describe('WebLLM Engine Module', () => {
-  let mockEngine;
-
   beforeEach(() => {
-    // Reset mocks before each test to guarantee independent test runs
     jest.clearAllMocks();
 
-    // Create a fake engine object with mock chat.completions.create method resolving to dummy output
-    mockEngine = {
-      chat: {
-        completions: {
-          create: jest.fn().mockResolvedValue({
-            choices: [
-              {
-                message: {
-                  content: 'Mocked dummy response'
-                }
-              }
-            ]
-          })
-        }
+    mockEngine.chat.completions.create.mockResolvedValue({
+      choices: [{
+        message: { content: 'Mocked dummy response' }
+      }]
+    });
+    mockEngine.reload.mockResolvedValue(undefined);
+    MLCEngineMock.mockClear();
+    
+    global.chrome = {
+      runtime: {
+        sendMessage: jest.fn()
       }
     };
-
-    // Setup CreateMLCEngine to resolve with the fake engine object
-    CreateMLCEngine.mockResolvedValue(mockEngine);
   });
 
-  describe('initializeLLM', () => {
-    it('should call CreateMLCEngine with the correct model ID and VRAM capping configurations', async () => {
-      const engine = await initializeLLM();
+  describe('LLMManager', () => {
+    it('should initialize MLCEngine and set progress callback', async () => {
+      const manager = new LLMManager();
+      await manager.initEngine();
       
-      expect(CreateMLCEngine).toHaveBeenCalledTimes(1);
+      expect(MLCEngineMock).toHaveBeenCalledTimes(1);
+      expect(manager.engine).toBe(mockEngine);
+      expect(mockEngine.setInitProgressCallback).toHaveBeenCalledTimes(1);
       
-      // Verify correct model ID and object parameters specifically context_window_size
-      expect(CreateMLCEngine).toHaveBeenCalledWith(
-        'gemma-2b-it-q4f16_1-MLC',
+      const callback = mockEngine.setInitProgressCallback.mock.calls[0][0];
+      callback({ text: 'Downloading', progress: 0.5 });
+      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+        type: 'DOWNLOAD_PROGRESS',
+        data: { text: 'Downloading', progress: 0.5 }
+      });
+    });
+
+    it('should load gemma model with WebGPU context caps', async () => {
+      const manager = new LLMManager();
+      manager.engine = mockEngine; 
+      
+      await manager.loadGemmaModel();
+      
+      expect(mockEngine.reload).toHaveBeenCalledTimes(1);
+      expect(mockEngine.reload).toHaveBeenCalledWith(
+        'gemma-2-2b-it-q4f16_1-MLC',
         expect.objectContaining({
-          context_window_size: 1024,
-          initProgressCallback: expect.any(Function)
+          context_window_size: 2048,
+          sliding_window_size: 2048
         })
       );
-      
-      // Assure the returned engine instance matches the generated fake engine
-      expect(engine).toBe(mockEngine);
     });
   });
 
   describe('LocalWebLLMBridge', () => {
     it('should format LangChain messages, call mock engine, and accurately parse the ChatResult', async () => {
-      // Instantiate our custom bridge class providing the dummy engine
-      const bridge = new LocalWebLLMBridge(mockEngine);
+      const manager = new LLMManager();
+      manager.engine = mockEngine;
+      const bridge = new LocalWebLLMBridge(manager);
       
-      // Generate array of LangChain messages containing one SystemMessage and one HumanMessage
       const messages = [
         new SystemMessage('You are a helpful assistant.'),
         new HumanMessage('Hello, how are you?')
@@ -91,22 +92,21 @@ describe('WebLLM Engine Module', () => {
 
       const result = await bridge._generate(messages);
 
-      // 1. Verify the _generate method properly forwarded the correctly formatted standard schema
       expect(mockEngine.chat.completions.create).toHaveBeenCalledTimes(1);
       expect(mockEngine.chat.completions.create).toHaveBeenCalledWith({
         messages: [
           { role: 'system', content: 'You are a helpful assistant.' },
           { role: 'user', content: 'Hello, how are you?' }
-        ]
+        ],
+        temperature: 0.7,
+        max_tokens: 2048
       });
 
-      // 2. Map and parse the returned results successfully verifying standard ChatResult outline
       expect(result.generations).toBeDefined();
       expect(result.generations.length).toBe(1);
       
       const generation = result.generations[0];
       
-      // 3. Ensuring parsed result includes an actual AIMessage instance directly
       expect(generation.text).toBe('Mocked dummy response');
       expect(generation.message).toBeInstanceOf(AIMessage);
       expect(generation.message.content).toBe('Mocked dummy response');

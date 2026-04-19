@@ -1,29 +1,32 @@
-import { CreateMLCEngine } from "@mlc-ai/web-llm";
+import { MLCEngine } from "@mlc-ai/web-llm";
 import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { AIMessage } from "@langchain/core/messages";
 
-export async function initializeLLM() {
-  const initProgressCallback = (report) => {
-    console.log("LLM Download Progress:", report.text);
-  };
+export class LLMManager {
+  constructor() {
+    this.engine = null;
+  }
 
-  // Create engine and strictly cap VRAM usage via context window limitations
-  const engine = await CreateMLCEngine(
-    "gemma-4-e2b-it-q4f16_1-MLC",
-    {
-      initProgressCallback: initProgressCallback,
+  async initEngine() {
+    this.engine = new MLCEngine();
+    this.engine.setInitProgressCallback((progress) => {
+      chrome.runtime.sendMessage({ type: 'DOWNLOAD_PROGRESS', data: progress });
+    });
+  }
+
+  async loadGemmaModel() {
+    // IndexedDB caching is enabled by default in WebLLM
+    await this.engine.reload("gemma-2-2b-it-q4f16_1-MLC", {
       context_window_size: 2048,
       sliding_window_size: 2048,
-    }
-  );
-
-  return engine;
+    });
+  }
 }
 
 export class LocalWebLLMBridge extends BaseChatModel {
-  constructor(engine) {
+  constructor(llmManager) {
     super({});
-    this.engine = engine;
+    this.llmManager = llmManager;
   }
 
   _llmType() {
@@ -47,8 +50,10 @@ export class LocalWebLLMBridge extends BaseChatModel {
       };
     });
 
-    const completion = await this.engine.chat.completions.create({
-      messages: formattedMessages
+    const completion = await this.llmManager.engine.chat.completions.create({
+      messages: formattedMessages,
+      temperature: 0.7,
+      max_tokens: 2048
     });
 
     const responseContent = completion.choices[0].message.content;
