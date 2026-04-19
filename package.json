@@ -2,11 +2,20 @@
   "name": "pro-prompt-agent",
   "version": "1.0.0",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": ""
+  "description": "",
+  "devDependencies": {
+    "@jest/globals": "^30.3.0",
+    "jest": "^30.3.0"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.1.40",
+    "@mlc-ai/web-llm": "^0.2.82"
+  }
 }
