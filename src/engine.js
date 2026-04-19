@@ -9,11 +9,11 @@ export async function initializeLLM() {
 
   // Create engine and strictly cap VRAM usage via context window limitations
   const engine = await CreateMLCEngine(
-    "gemma-2b-it-q4f16_1-MLC",
+    "gemma-4-e2b-it-q4f16_1-MLC",
     {
       initProgressCallback: initProgressCallback,
-      context_window_size: 1024,
-      sliding_window_size: 1024,
+      context_window_size: 2048,
+      sliding_window_size: 2048,
     }
   );
 
