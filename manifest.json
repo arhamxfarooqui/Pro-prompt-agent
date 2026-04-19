@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Local Agentic Orchestrator",
+  "version": "0.1.0",
+  "description": "Edge-Native Multi-Agent Prompt Orchestrator — runs a 1.5B LLM locally via WebGPU.",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "alarms"
+  ],
+  "minimum_chrome_version": "113"
+}
