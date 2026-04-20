@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Local Agentic Orchestrator",
+  "version": "1.0.0",
+  "description": "Zero-egress local agentic prompt engine explicitly orchestrating LangGraph boundaries totally offline.",
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/module3_ui/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/module3_ui/styles.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
