@@ -13,25 +13,16 @@ import { initDB } from "./storage.js";
  */
 let engine = null;
 
-/**
- * Initializes the local LLM engine. Pre-checks WebGPU hardware availability and uses
- * quantized 4-bit models natively, while providing progress callbacks to the UI.
- *
- * @param {Object} modelConfig - Configuration parameters for the engine.
- * @param {string} modelConfig.modelName - The specific model variant string (e.g., "gemma-2b-it-q4f16_1-MLC").
- * @param {number} modelConfig.capVRAM - VRAM boundary limit constraint.
- * @returns {Promise<void>} Resolves when initialization succeeds and alerts main thread via PostMessage.
- */
+// ==========================================
+// PHASE 1.2: ENGINE INITIALIZATION
+// ==========================================
+
 async function initializeEngine(modelConfig) {
   try {
     const { modelName, capVRAM } = modelConfig;
-    
-    // Hardware Check: Verify if the GPU is structurally supported to compute in the browser frame.
     const isWebGPU = navigator.gpu !== undefined && navigator.gpu !== null;
 
     if (!isWebGPU) {
-      // Missing API implies older browser, or blocked hardware flags.
-      // Automatically triggers CPU WasM mode context inside MLC logic inherently.
       self.postMessage({ 
         type: 'INIT_STATUS', 
         status: 'degraded_performance', 
@@ -39,7 +30,6 @@ async function initializeEngine(modelConfig) {
       });
     }
 
-    // Spin up MLC Engine, binding the initialization callback directly to UI hydration loops via postMessage.
     engine = await CreateMLCEngine(modelName, {
       initProgressCallback: (progress) => {
         self.postMessage({ 
@@ -64,10 +54,6 @@ async function initializeEngine(modelConfig) {
   }
 }
 
-/**
- * Validates Worker health natively and keeps Background Service lifecycle flags awake 
- * to resist random sleep interruptions when User changes browser tabs.
- */
 function pingWorkerHeartbeat() {
   self.postMessage({
     type: 'PONG',
@@ -76,13 +62,6 @@ function pingWorkerHeartbeat() {
   });
 }
 
-/**
- * Gathers, deserializes, and merges distributed memory logic chunks out of our native IDB.
- * Queries precisely what a Profile defines, filtering out archaic or compressed texts.
- *
- * @param {string} profileId - The explicitly referenced Profile's ID tag.
- * @returns {Promise<void>} Posts the monolithic joined string back to main thread orchestrators.
- */
 async function fetchProfileContext(profileId) {
   try {
     const db = await initDB();
@@ -90,22 +69,15 @@ async function fetchProfileContext(profileId) {
     const store = transaction.objectStore("ContextTable");
     const index = store.index("profileId");
 
-    // Fetch identically exact records bound to this ID
     const request = index.getAll(IDBKeyRange.only(profileId));
 
     request.onsuccess = (event) => {
       const chunks = event.target.result || [];
-
-      // Constraint: Discard auto-archived/compressed context memory loops
       const activeChunks = chunks.filter((chunk) => !chunk.isArchived);
-
-      // Sort chronological sequence array explicitly: Oldest to Newest
       activeChunks.sort((a, b) => a.timestamp - b.timestamp);
-
-      // Aggregate pure chunk data dynamically separating by standard newline
+      
       const aggregatedMemoryString = activeChunks.map((chunk) => chunk.text).join("\n");
 
-      // Transact finalized query string block
       self.postMessage({
         type: 'FETCH_CONTEXT_RESULT',
         profileId,
@@ -127,17 +99,166 @@ async function fetchProfileContext(profileId) {
   }
 }
 
+// ==========================================
+// PHASE 1.3: THE SPEED PIPELINE
+// ==========================================
+
 /**
- * The Central Global Message Router.
- * Subscribes to main thread (UI or LangGraph) messages implicitly running our background functions.
+ * Ultra-fast token stream for autocomplete interfaces.
+ * Uses stream:true to dispatch characters via postMessage directly avoiding Promise blocks.
+ * 
+ * @param {string} requestId - Invocation UUID boundary mapped to main-thread
+ * @param {string} prompt - Immediate sentence/fragment 
+ * @param {string} [systemInstruction] - Baseline rules constraint
  */
+async function generateTextStream(requestId, prompt, systemInstruction = "") {
+  try {
+    if (!engine) throw new Error("Engine not initialized");
+    
+    // Ghost-context purge hook explicitly enforcing clean slate memory logic
+    await engine.resetChat();
+
+    const messages = [];
+    if (systemInstruction) {
+        messages.push({ role: "system", content: systemInstruction });
+    }
+    messages.push({ role: "user", content: prompt });
+
+    const asyncChunkGenerator = await engine.chat.completions.create({
+      messages,
+      stream: true,
+      temperature: 0.6,
+      max_tokens: 512
+    });
+
+    // Execute Native Loop
+    for await (const chunk of asyncChunkGenerator) {
+      const content = chunk.choices[0]?.delta?.content || "";
+      if (content) {
+        self.postMessage({
+          type: "STREAM_TOKEN",
+          id: requestId,
+          data: content
+        });
+      }
+    }
+
+    self.postMessage({
+      type: "STREAM_COMPLETE",
+      id: requestId
+    });
+  } catch (error) {
+    self.postMessage({
+      type: "STREAM_ERROR",
+      id: requestId,
+      error: error.message || error.toString()
+    });
+  }
+}
+
+/**
+ * Executes arrays of agents iteratively strictly mitigating concurrent 2GB VRAM crashes.
+ *
+ * @param {string} requestId - Mapped Request UUID 
+ * @param {Array<{agentId: string, prompt: string}>} batch - Batch instructions array
+ */
+async function processBatchInference(requestId, batch) {
+  try {
+    if (!engine) throw new Error("Engine not initialized");
+    const results = [];
+
+    // The Synchronous Event Queue implementation mapping explicitly over individual VRAM transactions
+    for (const agent of batch) {
+      // Vital memory bleed protection layer explicitly required inside iterative batches
+      await engine.resetChat();
+
+      const response = await engine.chat.completions.create({
+        messages: [{ role: "user", content: agent.prompt }],
+        stream: false,
+        temperature: 0.5
+      });
+      
+      results.push({
+        agentId: agent.agentId,
+        result: response.choices[0]?.message?.content || ""
+      });
+    }
+
+    self.postMessage({
+      type: "BATCH_COMPLETE",
+      id: requestId,
+      data: results
+    });
+  } catch (error) {
+    self.postMessage({
+      type: "BATCH_ERROR",
+      id: requestId,
+      error: error.message || error.toString()
+    });
+  }
+}
+
+/**
+ * Dedicated prompt scoring evaluator logic bridging string parsing against dynamic Regex filters.
+ *
+ * @param {string} requestId - Mapped Request ID
+ * @param {string} text - Raw payload output text generated by orchestrator loop
+ */
+async function runStandaloneScorer(requestId, text) {
+  try {
+    if (!engine) throw new Error("Engine not initialized");
+    
+    // Purge memory parameters isolating scoring schema
+    await engine.resetChat();
+
+    const response = await engine.chat.completions.create({
+      messages: [
+        { role: "system", content: "You are a quantitative prompt scoring agent evaluator. Output ONLY valid JSON. No markdown framing. No conversational filler whatsoever." },
+        { role: "user", content: `Evaluate this and respond strictly in JSON formatted { "score": number, "reasoning": "string" }: ${text}` }
+      ],
+      stream: false,
+      temperature: 0.1 // Strict mechanical decoding consistency
+    });
+
+    const rawOutput = response.choices[0]?.message?.content || "";
+    let parsedObject = { score: 10, reasoning: "Fallback exception: String extraction logic internally crashed due to hallucinated formatting." };
+
+    try {
+      // The Sanitizer Regex: Extracts brackets ignoring external markdown block string boundaries (` ```json ` defaults)
+      const match = rawOutput.match(/\{[\s\S]*\}/);
+      if (match) {
+        parsedObject = JSON.parse(match[0]);
+      } else {
+        parsedObject = JSON.parse(rawOutput); // Blind string fallback logic
+      }
+    } catch (parseException) {
+      console.warn("JSON Parse Filter Hallucination Detected:", rawOutput);
+    }
+
+    self.postMessage({
+      type: "SCORE_RESULT",
+      id: requestId,
+      data: parsedObject
+    });
+  } catch (error) {
+    self.postMessage({
+      type: "SCORE_ERROR",
+      id: requestId,
+      error: error.message || error.toString()
+    });
+  }
+}
+
+// ==========================================
+// MESSAGE ROUTER
+// ==========================================
+
 self.onmessage = async (event) => {
   const { type, payload } = event.data;
 
-  // Route strictly dynamically using explicit explicit tags
   switch (type) {
     case 'INIT_ENGINE':
-      await initializeEngine(payload); // payload: { modelName, capVRAM }
+      await initializeEngine(payload);
       break;
 
     case 'PING':
@@ -146,6 +267,19 @@ self.onmessage = async (event) => {
 
     case 'FETCH_CONTEXT':
       await fetchProfileContext(payload.profileId);
+      break;
+
+    // Phase 1.3 Additions
+    case 'GENERATE_STREAM':
+      await generateTextStream(payload.id, payload.prompt, payload.systemInstruction);
+      break;
+
+    case 'RUN_BATCH':
+      await processBatchInference(payload.id, payload.batch);
+      break;
+
+    case 'RUN_SCORER':
+      await runStandaloneScorer(payload.id, payload.text);
       break;
 
     default:
