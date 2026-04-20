@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "devDependencies": {
+    "fake-indexeddb": "^6.2.5",
+    "jest": "^30.3.0",
     "vite": "^5.0.0"
   },
   "dependencies": {
