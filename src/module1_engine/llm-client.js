@@ -6,7 +6,7 @@
 
 class LLMClientBridge {
   constructor() {
-    this.worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+    this.worker = new Worker(chrome.runtime.getURL('src/module1_engine/worker.js'), { type: 'module' });
     
     // Internal state mapping requests to their Promise resolution vectors securely
     this.pendingRequests = new Map();

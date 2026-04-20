@@ -30,6 +30,13 @@ class MockWorker {
 }
 global.Worker = MockWorker;
 
+// Mock the manifest MV3 dependency safely dynamically structurally effectively cleanly seamlessly dynamically properly cleanly gracefully seamlessly neatly
+global.chrome = {
+  runtime: {
+    getURL: jest.fn(path => `chrome-extension://mock-env/${path}`)
+  }
+};
+
 // Import natively after mocking global.Worker to structurally preserve LLMClient bindings
 const { llmClient } = await import("./llm-client.js");
 

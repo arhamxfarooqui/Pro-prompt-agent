@@ -10,16 +10,26 @@
   "host_permissions": [
     "<all_urls>"
   ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["src/module3_ui/content.js"],
+      "js": [
+        "src/module3_ui/content.js",
+        "src/module3_ui/autocomplete-ui.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/module3_ui/styles.css"],
+      "resources": [
+        "src/module3_ui/styles.css",
+        "src/module1_engine/worker.js"
+      ],
       "matches": ["<all_urls>"]
     }
   ]
