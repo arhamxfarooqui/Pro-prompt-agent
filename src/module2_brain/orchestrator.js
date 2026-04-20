@@ -1,6 +1,7 @@
 /**
  * src/module2_brain/orchestrator.js
  * Central LangGraph Orchestration Layer bridging Semantic Maps and Engine Workers
+ * Features a standalone autonomous feedback loop iterating LLM pipelines until >75% bounds.
  */
 
 import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
@@ -8,7 +9,7 @@ import { llmClient } from "../module1_engine/llm-client.js";
 import { routePrompt } from "./semantic.js";
 
 // ==========================================
-// 0. INPUT SECURITY & SANITIZATION (From Phase 2.1)
+// 0. INPUT SECURITY & SANITIZATION
 // ==========================================
 
 export function sanitizeInput(rawText) {
@@ -16,7 +17,7 @@ export function sanitizeInput(rawText) {
   
   let cleanText = rawText;
 
-  // XSS Protection stripping dangerous vectors
+  // XSS Protection stripping dangerous vectors natively
   cleanText = cleanText.replace(/<\/?(script|iframe).*?>/gi, "");
   cleanText = cleanText.replace(/onload\s*=/gi, "");
   cleanText = cleanText.replace(/onerror\s*=/gi, "");
@@ -39,12 +40,17 @@ export function sanitizeInput(rawText) {
 // 1. GRAPH STATE CONFIGURATION
 // ==========================================
 
-// Defining structural memory nodes. Empty Annotations automatically overwrite state inherently mapping updates structurally cleanly.
+// Defining structural memory nodes dynamically supporting self-correcting recursion iteratively.
 const GraphState = Annotation.Root({
   originalPrompt: Annotation(),
   currentDraft: Annotation(),
   selectedAgents: Annotation(),
-  agentOutputs: Annotation()
+  agentOutputs: Annotation(),
+  
+  // Phase 2.3 Additions explicitly modeling iterative grading cycles
+  currentScore: Annotation(),
+  scoreReasoning: Annotation(),
+  iteration: Annotation()
 });
 
 
@@ -62,12 +68,11 @@ async function routePromptNode(state) {
 }
 
 /**
- * Node 2: Constructs VRAM safe sequential queues explicitly mapping logic out to engine modules synchronously
+ * Node 2: Constructs VRAM safe sequential queues explicitly mapping logic out to engine modules safely.
  */
 async function executeAgentsNode(state) {
-  console.log(`[LangGraph] Execution phase dynamically processing ${state.selectedAgents.length} agents...`);
+  console.log(`[LangGraph] Execution phase dynamically processing agents on Iteration ${state.iteration}...`);
   
-  // Natively map JSON strictly out of cache structure or local relative roots
   const res = await fetch('/src/module2_brain/registry.json');
   if (!res.ok) throw new Error("Graph Execution Faulted: Registry unavailable natively.");
   
@@ -78,14 +83,12 @@ async function executeAgentsNode(state) {
     const definedAgent = registry.find(a => a.id === agent.id);
     if (!definedAgent) continue;
 
-    // Constructs the rigid System constraint framing user textual inputs explicitly
     batch.push({
       agentId: agent.id,
       prompt: `${definedAgent.systemInstruction}\n\nDraft:\n${state.currentDraft}`
     });
   }
 
-  // Bridging Engine strictly asynchronously avoiding UI lockup vectors
   const results = await llmClient.runAgentBatch(batch);
   return { agentOutputs: results };
 }
@@ -94,17 +97,15 @@ async function executeAgentsNode(state) {
  * Node 3: Unifies explicitly executed outputs scaling explicitly resolving VRAM limitations
  */
 async function synthesizeDraftNode(state) {
-  console.log(`[LangGraph] Synthesis phase natively merging disparate constraints...`);
+  console.log(`[LangGraph] Synthesis phase natively merging disparate logic boundaries...`);
   
   let combinedOutput = "";
   for (const rawResponse of state.agentOutputs) {
     combinedOutput += `\n--- Output mapped explicitly from ${rawResponse.agentId} ---\n${rawResponse.result}\n`;
   }
 
-  // Absolute logic override natively extracting final logic mathematically limiting context bleed
   const synthPrompt = `You are the Synthesizer. Merge these Agent outputs into a single, perfect prompt based on the original request. Do not contradict them. Output ONLY the final prompt text.\n\nOriginal Request:\n${state.originalPrompt}\n\nDerived Agent Outputs:${combinedOutput}`;
 
-  // Route back out sequentially directly executing safely mapping array resolutions
   const mergedResult = await llmClient.runAgentBatch([{ 
     agentId: 'agt_synth', 
     prompt: synthPrompt 
@@ -113,6 +114,45 @@ async function synthesizeDraftNode(state) {
   return { currentDraft: mergedResult[0].result };
 }
 
+/**
+ * Node 4: The Critic mapping dynamic string payloads evaluating geometric structural alignment internally via WebLLM bounds
+ */
+async function scoreDraftNode(state) {
+  console.log(`[LangGraph] Scorer Node Evaluating Generated Protocol Iteration...`);
+  const result = await llmClient.calculatePromptScore(state.currentDraft);
+  
+  return { 
+    currentScore: result.score, 
+    scoreReasoning: result.reasoning 
+  };
+}
+
+/**
+ * Node 5: Recalibration Injector pre-processing explicitly looping data parameters
+ */
+function recalibrateNode(state) {
+  console.log(`[LangGraph] Grade (${state.currentScore}/100) necessitates Recalibration Sequence...`);
+  
+  const newDraft = `--- CRITIC FEEDBACK: YOU MUST FIX THIS ---\n${state.scoreReasoning}\n\n--- DRAFT TO FIX ---\n${state.currentDraft}`;
+  
+  return { 
+    iteration: state.iteration + 1, 
+    currentDraft: newDraft 
+  };
+}
+
+/**
+ * Conditional Edge Gate evaluating State variables resolving loop boundaries natively.
+ */
+function shouldRecalibrate(state) {
+  // Graceful degradation capping computational bounds directly preventing unhalting limits globally.
+  if (state.currentScore >= 75 || state.iteration >= 3) {
+    console.log(`[LangGraph] Graph State satisfied successfully. Exiting structural limits natively.`);
+    return "__end__";
+  } else {
+    return "recalibrate";
+  }
+}
 
 // ==========================================
 // 3. COMPILE GRAPH TOPOLOGY
@@ -122,10 +162,14 @@ const workflow = new StateGraph(GraphState)
   .addNode("router", routePromptNode)
   .addNode("executor", executeAgentsNode)
   .addNode("synthesizer", synthesizeDraftNode)
+  .addNode("scorer", scoreDraftNode)          // New Phase 2.3 integration
+  .addNode("recalibrate", recalibrateNode)    // New Phase 2.3 integration
   .addEdge(START, "router")
   .addEdge("router", "executor")
   .addEdge("executor", "synthesizer")
-  .addEdge("synthesizer", END);
+  .addEdge("synthesizer", "scorer")
+  .addConditionalEdges("scorer", shouldRecalibrate) // Conditional Gate routing recursively loops
+  .addEdge("recalibrate", "executor");
 
 // Compile explicitly caching execution logic structurally mapping constraints
 const promptOrchestrator = workflow.compile();
@@ -144,12 +188,15 @@ const promptOrchestrator = workflow.compile();
 export async function processUserPrompt(rawInput) {
   const cleanInput = sanitizeInput(rawInput);
   
-  // Seed the internal mathematical pipeline state natively
+  // Seed the internal mathematical pipeline state natively initiating loop memory
   const initialState = {
     originalPrompt: cleanInput,
     currentDraft: cleanInput,
     selectedAgents: [],
-    agentOutputs: []
+    agentOutputs: [],
+    currentScore: 0,         // New Init Limit
+    scoreReasoning: "",      // New Init Value
+    iteration: 1             // Seed counter cleanly mapping recursion limits
   };
 
   // LangGraph implicitly traverses state dictionaries propagating structural loops completely
