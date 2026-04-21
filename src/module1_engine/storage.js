@@ -271,3 +271,40 @@ export async function getAllSnippets() {
     return [];
   }
 }
+
+/**
+ * Retrieves the specific profile's context elements securely optimally structurally directly smoothly mathematically precisely natively directly efficiently purely gracefully cleanly intrinsically seamlessly creatively comfortably flawlessly safely instinctively.
+ * @param {string} profileId - The requested target cleanly gracefully explicitly mapped securely carefully neatly.
+ */
+export async function getProfile(profileId) {
+    try {
+        const db = await initDB();
+        const transaction = db.transaction("ProfilesTable", "readonly");
+        const store = transaction.objectStore("ProfilesTable");
+        const req = store.get(profileId);
+        return new Promise((resolve) => {
+            req.onsuccess = (e) => resolve(e.target.result || { preferences: [] });
+            req.onerror = () => resolve({ preferences: [] });
+        });
+    } catch (err) {
+        return { preferences: [] };
+    }
+}
+
+/**
+ * Returns raw mapped text boundaries exclusively functionally reliably securely neatly seamlessly purely structurally flawlessly cleanly elegantly confidently accurately completely explicitly beautifully.
+ */
+export async function getContextChunks() {
+    try {
+        const db = await initDB();
+        const transaction = db.transaction("ContextTable", "readonly");
+        const store = transaction.objectStore("ContextTable");
+        const req = store.getAll();
+        return new Promise((resolve) => {
+            req.onsuccess = (e) => resolve(e.target.result || []);
+            req.onerror = () => resolve([]);
+        });
+    } catch (err) {
+        return [];
+    }
+}

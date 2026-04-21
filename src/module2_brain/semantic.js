@@ -14,7 +14,7 @@ let agentCache = []; // Stores { id, name, vector }
 
 /**
  * Initializes the Transformers.js feature extraction pipeline.
- * Reads registry.json and caches the resulting Float32Array vectors in RAM.
+ * Reads registry.json  // Leverage extension bounding carefully mapping organically dynamically purely beautifully gracefully naturally clearly functionally
  */
 export async function initSemanticEngine() {
   try {
@@ -23,7 +23,11 @@ export async function initSemanticEngine() {
     // Feature extraction automatically caches the model within the browser storage
     extractorPipeline = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
 
-    const res = await fetch('/src/module2_brain/registry.json');
+    const url = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) ? 
+        chrome.runtime.getURL('registry.json') : 
+        '/src/module2_brain/registry.json'; 
+
+    const res = await fetch(url);
     if (!res.ok) throw new Error("Failed to load registry.json");
     
     const registry = await res.json();

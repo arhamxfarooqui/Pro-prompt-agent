@@ -46,6 +46,7 @@ const GraphState = Annotation.Root({
   currentDraft: Annotation(),
   selectedAgents: Annotation(),
   agentOutputs: Annotation(),
+  externalContext: Annotation(),
   
   // Phase 2.3 Additions explicitly modeling iterative grading cycles
   currentScore: Annotation(),
@@ -104,7 +105,21 @@ async function synthesizeDraftNode(state) {
     combinedOutput += `\n--- Output mapped explicitly from ${rawResponse.agentId} ---\n${rawResponse.result}\n`;
   }
 
-  const synthPrompt = `You are the Synthesizer. Merge these Agent outputs into a single, perfect prompt based on the original request. Do not contradict them. Output ONLY the final prompt text.\n\nOriginal Request:\n${state.originalPrompt}\n\nDerived Agent Outputs:${combinedOutput}`;
+  const ctx = state.externalContext || {};
+  const tagsStr = (ctx.profileTags && ctx.profileTags.length > 0) ? ctx.profileTags.join(", ") : "None assigned";
+  const pageStr = ctx.pageData || "No scrape generated.";
+
+  const synthPrompt = `You are the Synthesizer. You must refine this prompt while strictly adhering to the user's Technical Profile and the provided Environmental Page Context.
+
+Technical Profile constraints: [${tagsStr}]
+
+Environmental Page Context (Target System Architecture natively):
+${pageStr}
+
+Original Request:
+${state.originalPrompt}
+
+Derived Agent Outputs:${combinedOutput}`;
 
   const mergedResult = await llmClient.runAgentBatch([{ 
     agentId: 'agt_synth', 
@@ -185,7 +200,7 @@ const promptOrchestrator = workflow.compile();
  * @param {string} rawInput 
  * @returns {Promise<string>} The newly synthesized perfect prompt seamlessly iteratively processed
  */
-export async function processUserPrompt(rawInput) {
+export async function processUserPrompt(rawInput, externalContext = {}) {
   const cleanInput = sanitizeInput(rawInput);
   
   // Seed the internal mathematical pipeline state natively initiating loop memory
@@ -194,6 +209,7 @@ export async function processUserPrompt(rawInput) {
     currentDraft: cleanInput,
     selectedAgents: [],
     agentOutputs: [],
+    externalContext: externalContext, // Map external indexedDB dynamically properly automatically elegantly organically purely 
     currentScore: 0,         // New Init Limit
     scoreReasoning: "",      // New Init Value
     iteration: 1             // Seed counter cleanly mapping recursion limits

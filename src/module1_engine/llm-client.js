@@ -6,13 +6,17 @@
 
 class LLMClientBridge {
   constructor() {
-    this.worker = new Worker(chrome.runtime.getURL('src/module1_engine/worker.js'), { type: 'module' });
-    
-    // Internal state mapping requests to their Promise resolution vectors securely
+    this.worker = null;
     this.pendingRequests = new Map();
     this.streamCallbacks = new Map();
+  }
 
-    this.worker.onmessage = this._handleWorkerMessage.bind(this);
+  _getWorker() {
+    if (!this.worker) {
+      this.worker = new Worker(chrome.runtime.getURL('worker.js'), { type: 'module' });
+      this.worker.onmessage = this._handleWorkerMessage.bind(this);
+    }
+    return this.worker;
   }
 
   /**
@@ -90,8 +94,8 @@ class LLMClientBridge {
    * @param {number} [capVRAM=2048] 
    */
   initialize(modelName = "gemma-2b-it-q4f16_1-MLC", capVRAM = 2048) {
-    this.worker.postMessage({
-      type: 'INIT_ENGINE',
+    this._getWorker().postMessage({
+      type: "INIT_ENGINE",
       payload: { modelName, capVRAM }
     });
   }
@@ -109,8 +113,8 @@ class LLMClientBridge {
       this.pendingRequests.set(id, { resolve, reject });
       this.streamCallbacks.set(id, onToken);
 
-      this.worker.postMessage({
-        type: 'GENERATE_STREAM',
+      this._getWorker().postMessage({
+        type: "GENERATE_STREAM",
         payload: { id, prompt: text }
       });
     });
@@ -127,8 +131,8 @@ class LLMClientBridge {
       const id = this._generateId();
       this.pendingRequests.set(id, { resolve, reject });
 
-      this.worker.postMessage({
-        type: 'RUN_BATCH',
+      this._getWorker().postMessage({
+        type: "RUN_BATCH",
         payload: { id, batch: agents }
       });
     });
@@ -145,9 +149,29 @@ class LLMClientBridge {
       const id = this._generateId();
       this.pendingRequests.set(id, { resolve, reject });
 
-      this.worker.postMessage({
-        type: 'RUN_SCORER',
+      this._getWorker().postMessage({
+        type: "RUN_SCORER",
         payload: { id, text }
+      });
+    });
+  }
+
+  /**
+   * Delegates the full LangGraph orchestration pipeline to the Web Worker.
+   * This keeps background.js free of heavy ONNX/Transformers/LangGraph deps.
+   *
+   * @param {string} prompt - The raw user prompt
+   * @param {object} context - External context (profile tags, page data)
+   * @returns {Promise<string>} The refined prompt from the orchestrator
+   */
+  runOrchestration(prompt, context = {}) {
+    return new Promise((resolve, reject) => {
+      const id = this._generateId();
+      this.pendingRequests.set(id, { resolve, reject });
+
+      this._getWorker().postMessage({
+        type: "RUN_ORCHESTRATION",
+        payload: { id, prompt, context }
       });
     });
   }

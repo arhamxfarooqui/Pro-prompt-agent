@@ -1,30 +1,145 @@
 /**
  * src/background.js
- * Headless Service Worker natively decoupling structural inference layers automatically bridging correctly reliably effectively completely natively organically elegantly mapping safely optimally clearly mapping securely locally correctly explicitly dynamically seamlessly intuitively explicitly accurately explicitly correctly flawlessly.
+ * MV3 Service Worker — storage router + offscreen document manager.
+ * Routes LLM operations to an offscreen document (which can safely create Workers).
  */
 
-import { llmClient } from "./module1_engine/llm-client.js";
+import * as storage from "./module1_engine/storage.js";
 
-console.log("[Service Worker] Local Zero-Egress Engine natively Bootstrapping...");
+let offscreenCreated = false;
 
-// Ensures local WebGPU instances load structurally deeply mapping correctly seamlessly actively properly dynamically cleanly explicitly successfully naturally inherently fundamentally intelligently perfectly efficiently optimally explicitly correctly flawlessly seamlessly gracefully safely properly exclusively cleanly dynamically
-llmClient.initialize("gemma-2b-it-q4f16_1-MLC", 2048);
-
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== "autocomplete-stream") return;
-
-  port.onMessage.addListener(async (msg) => {
-    if (msg.type === "START_AUTOCOMPLETE") {
-      try {
-        await llmClient.streamAutocomplete(msg.payload, (tokenDelta) => {
-          port.postMessage({ type: "TOKEN", data: tokenDelta });
-        });
-        
-        port.postMessage({ type: "STREAM_COMPLETE" });
-      } catch (err) {
-        console.error(`[Service Worker] Stream fully natively explicitly inherently accurately properly securely effectively completely purely explicitly efficiently correctly accurately cleanly elegantly completely functionally safely functionally safely robustly cleanly successfully effectively actively dynamically correctly organically seamlessly uniquely globally optimally naturally smoothly efficiently successfully explicitly uniquely naturally naturally exactly structurally logically inherently carefully successfully deeply strictly cleanly inherently dynamically purely properly clearly actively logically completely correctly mathematically successfully correctly accurately structurally natively completely intelligently cleanly perfectly natively organically effectively properly dynamically efficiently uniquely perfectly seamlessly functionally successfully natively intelligently successfully automatically seamlessly functionally properly intrinsically successfully organically cleanly securely flawlessly uniquely flawlessly successfully seamlessly functionally dynamically natively intelligently optimally naturally effectively actively successfully intuitively seamlessly dynamically safely exactly smartly smartly naturally smoothly correctly correctly safely optimally logically dynamically beautifully gracefully gracefully effectively smoothly dynamically properly automatically perfectly properly robustly cleanly.`, err);
-        port.postMessage({ type: "STREAM_ERROR", error: err.message });
-      }
+async function ensureOffscreen() {
+  if (offscreenCreated) return;
+  try {
+    await chrome.offscreen.createDocument({
+      url: "offscreen.html",
+      reasons: ["WORKERS"],
+      justification: "LLM inference via Web Worker for prompt orchestration"
+    });
+    offscreenCreated = true;
+    console.log("[SW] Offscreen document created.");
+  } catch (e) {
+    if (e.message && e.message.includes("already exists")) {
+      offscreenCreated = true;
+    } else {
+      console.error("[SW] Failed to create offscreen document:", e);
     }
-  });
+  }
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+
+  // === STORAGE OPERATIONS ===
+
+  if (msg.type === "GET_STORAGE_CONTEXT") {
+    (async () => {
+      try {
+        const profile = await storage.getProfile("default");
+        const chunks = await storage.getContextChunks();
+        let tags = (profile && profile.preferences) ? profile.preferences : [];
+        let pageData = (chunks && chunks.length > 0) ? chunks[chunks.length - 1].text : "";
+        sendResponse({ success: true, data: { profileTags: tags, pageData: pageData } });
+      } catch (err) {
+        console.error("[SW] GET_STORAGE_CONTEXT error:", err);
+        sendResponse({ success: true, data: { profileTags: [], pageData: "" } });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === "SAVE_SCRAPED_CONTEXT") {
+    (async () => {
+      try {
+        // saveContextChunk(profileId, rawText, source)
+        await storage.saveContextChunk("default", msg.payload, "Scraper");
+        sendResponse({ success: true });
+      } catch (err) {
+        console.error("[SW] SAVE_SCRAPED_CONTEXT error:", err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === "SAVE_PROFILE_TAGS") {
+    (async () => {
+      try {
+        await storage.createNewProfile({ 
+          name: "Manual Active Tags", 
+          initialRules: msg.payload.join(", ") 
+        });
+        sendResponse({ success: true });
+      } catch (err) {
+        console.error("[SW] SAVE_PROFILE_TAGS error:", err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === "SAVE_SNIPPET") {
+    (async () => {
+      try {
+        await storage.saveSnippet("snip_" + Date.now(), msg.payload);
+        sendResponse({ success: true });
+      } catch (err) {
+        console.error("[SW] SAVE_SNIPPET error:", err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === "GET_SNIPPETS") {
+    (async () => {
+      try {
+        const raws = await storage.getAllSnippets();
+        const data = raws.map(s => ({ text: s.bodyText }));
+        sendResponse({ success: true, data: data });
+      } catch (err) {
+        console.error("[SW] GET_SNIPPETS error:", err);
+        sendResponse({ success: true, data: [] });
+      }
+    })();
+    return true;
+  }
+
+  // === LLM OPERATIONS (forwarded to offscreen document) ===
+
+  if (msg.type === "LLM_INIT" || msg.type === "LLM_ORCHESTRATE" || 
+      msg.type === "LLM_SCORE" || msg.type === "LLM_STREAM") {
+    (async () => {
+      try {
+        await ensureOffscreen();
+        // Forward to offscreen document
+        chrome.runtime.sendMessage({ target: "offscreen", ...msg }, (response) => {
+          sendResponse(response || { success: false, error: "No response from offscreen" });
+        });
+      } catch (err) {
+        console.error("[SW] LLM forward error:", err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  // Messages from offscreen with target "background" are handled here
+  if (msg.target === "offscreen") {
+    // Offscreen handles these internally
+    return false;
+  }
+
+  // === PROGRESS BROADCASTS FROM OFFSCREEN → ALL TABS ===
+
+  if (msg.type === "LLM_DOWNLOAD_PROGRESS" || msg.type === "LLM_READY" || msg.type === "LLM_INIT_ERROR") {
+    // Broadcast to all tabs so content scripts can show progress UI
+    chrome.tabs.query({}, (tabs) => {
+      for (const tab of tabs) {
+        if (tab.id) {
+          chrome.tabs.sendMessage(tab.id, msg).catch(() => {});
+        }
+      }
+    });
+    return false;
+  }
 });

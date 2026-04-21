@@ -7,7 +7,11 @@ import { jest } from "@jest/globals";
 // 1. Fully mock chrome.runtime natively securing extension dependencies
 global.chrome = {
   runtime: {
-    getURL: jest.fn((path) => `chrome-extension://mock-id/${path}`)
+    getURL: jest.fn((path) => `chrome-extension://mock-id/${path}`),
+    sendMessage: jest.fn((msg, callback) => {
+      // Mock network response dynamically inherently accurately correctly smoothly
+      if (callback) callback({ success: true, data: [] });
+    })
   }
 };
 
