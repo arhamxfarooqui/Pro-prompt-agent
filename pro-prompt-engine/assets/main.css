@@ -1,0 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background-color: #0F172A;
+    color: #F8FAFC;
+    -webkit-font-smoothing: antialiased;
+  }
+  *:focus { outline: none; }
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: #0F172A; }
+  ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-white font-medium px-4 py-2 rounded-btn
+           transition-all duration-ui ease-ui hover:bg-primary-hover
+           focus:ring-2 focus:ring-primary-glow active:scale-[0.98] shadow-sm
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-icon {
+    @apply flex items-center justify-center bg-transparent rounded-lg
+           transition-all duration-ui ease-ui hover:bg-surface-hover text-text-secondary cursor-pointer border-none;
+  }
+  .card {
+    @apply bg-surface border border-border-default rounded-modal shadow-sm;
+  }
+  .input-field {
+    @apply w-full bg-background border border-border-default rounded-btn
+           px-3 py-2 text-body text-text-primary placeholder:text-text-muted
+           transition-all duration-ui ease-ui focus:border-primary focus:shadow-glow-blue;
+  }
+}
+
+select.input-field {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='%2394A3B8' d='M4.5 6l3.5 4 3.5-4z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+  cursor: pointer;
+}
+select.input-field option { background: #1E293B; color: #F8FAFC; }

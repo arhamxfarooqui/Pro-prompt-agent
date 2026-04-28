@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>WebLLM Offscreen</title></head>
+<body>
+<script type="module">
+/**
+ * Offscreen Document — @mlc-ai/web-llm Engine Host
+ *
+ * Hosts the WebLLM engine for in-browser GPU inference.
+ * Communicates with service worker via chrome.runtime messaging.
+ *
+ * Model lifecycle:
+ *   cold → loading (engine.reload) → hot → inference → hot
+ *                                   → error (catch + report)
+ *
+ * Keep-alive: 20-second GPU no-op to prevent VRAM eviction.
+ */
+
+import { CreateMLCEngine } from '@mlc-ai/web-llm';
+
+let engine = null;
+let modelState = 'cold'; // cold | loading | hot | error
+let currentModel = null;
+
+// ═══ Keep-Alive: Prevent VRAM eviction ═══
+let keepAliveInterval = null;
+let gpuDevice = null;
+
+async function initGPUKeepAlive() {
+  try {
+    if (!navigator.gpu) { console.warn('[Offscreen] WebGPU not available'); return; }
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) return;
+    gpuDevice = await adapter.requestDevice();
+    gpuDevice.lost.then(() => {
+      console.warn('[Offscreen] GPU device lost — re-acquiring in 5s');
+      modelState = 'cold';
+      setTimeout(initGPUKeepAlive, 5000);
+    });
+
+    // No-op GPU tick every 20 seconds
+    keepAliveInterval = setInterval(() => {
+      if (!gpuDevice) return;
+      try {
+        const buf = gpuDevice.createBuffer({ size: 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+        buf.destroy();
+      } catch {}
+    }, 20_000);
+  } catch (e) { console.error('[Offscreen] GPU init failed:', e); }
+}
+
+initGPUKeepAlive();
+
+// ═══ Message Handler ═══
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.target !== 'offscreen') return;
+
+  const handler = async () => {
+    try {
+      switch (message.type) {
+        case 'WEBGPU_LOAD_MODEL': {
+          const { model } = message.payload;
+          modelState = 'loading';
+          currentModel = model;
+
+          try {
+            engine = await CreateMLCEngine(model, {
+              initProgressCallback: (report) => {
+                console.log(`[WebLLM] ${report.text}`);
+                // Notify SW of progress
+                chrome.runtime.sendMessage({
+                  type: 'MODEL_STATE_CHANGED',
+                  payload: { state: 'loading', progress: report.progress, text: report.text },
+                }).catch(() => {});
+              },
+            });
+            modelState = 'hot';
+            return { status: 'success', data: { state: 'hot', model } };
+          } catch (err) {
+            modelState = 'error';
+            return { error: err.message || String(err) };
+          }
+        }
+
+        case 'WEBGPU_INFERENCE': {
+          if (!engine || modelState !== 'hot') {
+            return { error: `Model not ready (state: ${modelState})` };
+          }
+
+          const { messages, maxTokens, temperature, stop } = message.payload;
+          const result = await engine.chat.completions.create({
+            messages,
+            max_tokens: maxTokens || 1024,
+            temperature: temperature || 0.7,
+            stream: false,
+            ...(stop ? { stop } : {}),
+          });
+
+          const content = result.choices?.[0]?.message?.content || '';
+          const tokensUsed = result.usage?.total_tokens;
+          return { data: { content, tokensUsed } };
+        }
+
+        case 'WEBGPU_UNLOAD': {
+          if (engine) {
+            await engine.unload?.();
+            engine = null;
+          }
+          modelState = 'cold';
+          currentModel = null;
+          return { status: 'success' };
+        }
+
+        case 'WEBGPU_CHECK_MODEL': {
+          // Check if model weights exist in cache/IndexedDB
+          const { model } = message.payload;
+          try {
+            // WebLLM stores models in Cache API
+            const cache = await caches.open('webllm/model');
+            const keys = await cache.keys();
+            const found = keys.some(key => key.url.includes(model));
+            return { data: { downloaded: found } };
+          } catch {
+            return { data: { downloaded: false } };
+          }
+        }
+
+        case 'GET_STATE':
+        case 'HEARTBEAT_PING':
+          return { status: 'alive', data: { state: modelState, model: currentModel } };
+
+        default:
+          return { error: `Unknown offscreen message type: ${message.type}` };
+      }
+    } catch (err) {
+      return { error: err.message || String(err) };
+    }
+  };
+
+  handler().then(sendResponse).catch(err => sendResponse({ error: String(err) }));
+  return true; // Async response
+});
+
+console.log('[Offscreen] WebLLM host ready');
+</script>
+</body>
+</html>

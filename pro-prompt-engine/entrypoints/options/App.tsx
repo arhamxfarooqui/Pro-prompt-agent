@@ -1,0 +1,547 @@
+/**
+ * Dashboard (Options Page) — Pro Prompt Engine
+ * Full-screen SaaS-style dashboard with sidebar and 6 views.
+ * Includes recharts for Analytics visualization.
+ */
+
+import { useState, useEffect } from 'react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import type { Profile } from '@lib/types/profile.types';
+import type { Snippet } from '@lib/types/snippet.types';
+import { prebuiltAppConfig } from '@mlc-ai/web-llm';
+
+function send<T = any>(type: string, payload?: unknown): Promise<T> {
+  return chrome.runtime.sendMessage({ type, payload }).then((r: any) => {
+    if (r?.status === 'error') throw new Error(r.message);
+    return r?.data as T;
+  });
+}
+
+type View = 'profiles' | 'snippets' | 'library' | 'analytics' | 'context' | 'settings';
+
+const NAV: { key: View; label: string; icon: string }[] = [
+  { key: 'profiles', label: 'Profiles', icon: '👤' },
+  { key: 'snippets', label: 'Snippets', icon: '📌' },
+  { key: 'library', label: 'Prompt Library', icon: '📚' },
+  { key: 'analytics', label: 'Analytics', icon: '📊' },
+  { key: 'context', label: 'Context Lab', icon: '🧪' },
+  { key: 'settings', label: 'Models & Settings', icon: '🧠' },
+];
+
+export default function App() {
+  const [view, setView] = useState<View>('profiles');
+  return (
+    <div className="flex h-screen bg-background text-text-primary">
+      <aside className="w-64 bg-surface border-r border-border-default flex flex-col shrink-0">
+        <div className="px-6 py-5 border-b border-border-default">
+          <div className="flex items-center gap-2.5">
+            <span className="text-2xl">⚡</span>
+            <div><h1 className="text-body font-bold">Pro Prompt Engine</h1><span className="text-small text-text-muted">v1.0.0</span></div>
+          </div>
+        </div>
+        <nav className="flex-1 px-3 py-4 space-y-1">
+          {NAV.map(({ key, label, icon }) => (
+            <button key={key} onClick={() => setView(key)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-body transition-all duration-150 text-left cursor-pointer border-none
+                ${view === key ? 'bg-primary/15 text-primary font-medium' : 'text-text-secondary hover:text-text-primary hover:bg-surface-hover bg-transparent'}`}>
+              <span className="text-lg">{icon}</span>{label}
+            </button>
+          ))}
+        </nav>
+        <div className="px-4 py-3 border-t border-border-default flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full bg-accent-green" />
+          <span className="text-small text-text-secondary">Extension Active</span>
+        </div>
+      </aside>
+
+      <main className="flex-1 overflow-auto"><div className="max-w-5xl mx-auto p-8">
+        {view === 'profiles' && <ProfilesView />}
+        {view === 'snippets' && <SnippetsView />}
+        {view === 'library' && <LibraryView />}
+        {view === 'analytics' && <AnalyticsView />}
+        {view === 'context' && <ContextLabView />}
+        {view === 'settings' && <SettingsView />}
+      </div></main>
+    </div>
+  );
+}
+
+// ═══ Profiles ═══
+function ProfilesView() {
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [selected, setSelected] = useState<Profile | null>(null);
+
+  useEffect(() => { send<Profile[]>('GET_ALL_PROFILES').then(p => setProfiles(p || [])).catch(() => {}); }, []);
+
+  const activate = async (p: Profile) => {
+    if (!p.id) return;
+    await send('SET_ACTIVE_PROFILE', { id: p.id });
+    setProfiles(prev => prev.map(x => ({ ...x, isActive: x.id === p.id })));
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div><h2 className="text-h1 font-bold">Profiles</h2><p className="text-body text-text-secondary mt-1">Manage your prompt engineering personas (4-file system).</p></div>
+        <button onClick={() => {
+            const newProfile: Profile = {
+              name: 'New Profile', description: 'Describe your persona here.', icon: '🧑‍💻', isActive: false, isCustom: true,
+              contextMd: '', promptGuidelinesMd: '', profileDescriptionMd: '', scoringGuidelinesMd: '',
+              agentWeights: { refactor: 1, scorer: 1, generator: 1, comprehension: 1 }, createdAt: Date.now(), updatedAt: Date.now()
+            };
+            send('SET_PROFILE', newProfile).then(() => send<Profile[]>('GET_ALL_PROFILES').then(setProfiles));
+        }} className="btn-primary px-4 py-2">+ Create Profile</button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {profiles.map(p => (
+          <div key={p.id} onClick={() => setSelected(selected?.id === p.id ? null : p)}
+            className={`card p-5 cursor-pointer transition-all duration-150 hover:border-primary/30
+              ${p.isActive ? 'border-primary/50 shadow-glow-sm' : ''} ${selected?.id === p.id ? 'ring-2 ring-primary/50' : ''}`}>
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl">{p.icon}</span>
+                <div>
+                  <h3 className="text-body font-semibold">{p.name}</h3>
+                  {p.isActive && <span className="text-small text-accent-green font-medium">● Active</span>}
+                </div>
+              </div>
+            </div>
+            <p className="text-small text-text-secondary leading-relaxed mb-3" style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{p.description}</p>
+            <div className="flex items-center justify-between pt-3 border-t border-border-default">
+              <span className="text-small text-text-muted">Context: {p.contextMd ? '✓' : '—'}</span>
+              {!p.isActive && <button onClick={(e) => { e.stopPropagation(); activate(p); }} className="text-small text-primary hover:text-primary-light cursor-pointer bg-transparent border-none">Activate</button>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {selected && (
+        <ProfileEditor key={selected.id} profile={selected} onSave={(updated) => {
+          send('SET_PROFILE', updated).then(() => {
+            send<Profile[]>('GET_ALL_PROFILES').then(setProfiles);
+            setSelected(updated);
+          });
+        }} onDelete={() => {
+          if (!selected.id) return;
+          if (!confirm(`Delete profile "${selected.name}"?`)) return;
+          send('DELETE_PROFILE', { id: selected.id }).then(() => {
+            send<Profile[]>('GET_ALL_PROFILES').then(setProfiles);
+            setSelected(null);
+          });
+        }} />
+      )}
+    </div>
+  );
+}
+
+function ProfileEditor({ profile, onSave, onDelete }: { profile: Profile; onSave: (p: Profile) => void; onDelete: () => void }) {
+  const [draft, setDraft] = useState({ ...profile });
+  const [saved, setSaved] = useState(false);
+  const up = (k: keyof Profile, v: string) => setDraft(d => ({ ...d, [k]: v }));
+  const tokenEst = Math.ceil((draft.contextMd?.length || 0) / 4);
+  const save = () => { onSave(draft); setSaved(true); setTimeout(() => setSaved(false), 2500); };
+
+  return (
+    <div className="mt-6 card p-6 animate-fade-in">
+      <div className="flex items-center justify-between mb-5">
+        <h3 className="text-h2 font-bold">{draft.icon} Edit Profile</h3>
+        <div className="flex items-center gap-3">
+          {saved && <span className="text-small text-accent-green">✅ Saved</span>}
+          <button onClick={onDelete} className="btn-icon w-8 h-8 hover:text-accent-red" title="Delete">🗑️</button>
+          <button onClick={() => onSave(profile)} className="btn-icon w-8 h-8">✕</button>
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div><label className="text-small text-text-muted block mb-1">Icon</label><input value={draft.icon} onChange={e => up('icon', e.target.value)} className="input-field" /></div>
+        <div className="col-span-2"><label className="text-small text-text-muted block mb-1">Name</label><input value={draft.name} onChange={e => up('name', e.target.value)} className="input-field" /></div>
+      </div>
+      <div className="mb-4"><label className="text-small text-text-muted block mb-1">Description</label><input value={draft.description} onChange={e => up('description', e.target.value)} className="input-field" /></div>
+      <div className="space-y-4">
+        <div>
+          <div className="flex justify-between mb-1"><label className="text-small text-text-muted">📄 Context.md</label><span className="text-small text-text-muted">~{tokenEst} tokens {tokenEst > 3800 ? '⚠️' : ''}</span></div>
+          <textarea value={draft.contextMd} onChange={e => up('contextMd', e.target.value)} rows={4} className="input-field font-mono text-small resize-y w-full" placeholder="Knowledge context fed to agents..." />
+        </div>
+        <div><label className="text-small text-text-muted block mb-1">📋 PromptGuidelines.md</label><textarea value={draft.promptGuidelinesMd} onChange={e => up('promptGuidelinesMd', e.target.value)} rows={4} className="input-field font-mono text-small resize-y w-full" /></div>
+        <div><label className="text-small text-text-muted block mb-1">📝 ProfileDescription.md</label><textarea value={draft.profileDescriptionMd} onChange={e => up('profileDescriptionMd', e.target.value)} rows={3} className="input-field font-mono text-small resize-y w-full" /></div>
+        <div><label className="text-small text-text-muted block mb-1">🎯 ScoringGuidelines.md</label><textarea value={draft.scoringGuidelinesMd || ''} onChange={e => up('scoringGuidelinesMd', e.target.value)} rows={4} className="input-field font-mono text-small resize-y w-full" /></div>
+      </div>
+      <button onClick={save} className="btn-primary px-6 py-2 mt-5">💾 Save Profile</button>
+    </div>
+  );
+}
+
+// ═══ Snippets ═══
+function SnippetsView() {
+  const [snippets, setSnippets] = useState<Snippet[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [prefix, setPrefix] = useState('');
+  const [desc, setDesc] = useState('');
+  const [body, setBody] = useState('');
+
+  useEffect(() => { load(); }, []);
+  const load = () => send<Snippet[]>('GET_SNIPPETS').then(s => setSnippets(s || [])).catch(() => {});
+
+  const create = async () => {
+    if (!prefix.trim() || !body.trim()) return;
+    await send('SAVE_SNIPPET', { id: editingId ?? undefined, prefix, description: desc, body });
+    setPrefix(''); setDesc(''); setBody(''); setShowForm(false); setEditingId(null);
+    load();
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div><h2 className="text-h1 font-bold">Snippets</h2><p className="text-body text-text-secondary mt-1">Reusable prompt fragments. Type <code className="text-primary bg-primary/10 px-1 rounded">/prefix</code> in any text field to insert.</p></div>
+        <button onClick={() => setShowForm(!showForm)} className="btn-primary px-4 py-2">{showForm ? 'Cancel' : '+ New Snippet'}</button>
+      </div>
+      {showForm && (
+        <div className="card p-5 mb-6 animate-fade-in">
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div><label className="text-small text-text-muted block mb-1">Prefix</label><input value={prefix} onChange={e => {
+                let val = e.target.value;
+                if (!val.startsWith('/')) val = '/' + val.replace(/^\/+/, '');
+                setPrefix(val);
+              }} placeholder="/dev" className="input-field" /></div>
+            <div><label className="text-small text-text-muted block mb-1">Description</label><input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Senior dev persona" className="input-field" /></div>
+          </div>
+          <label className="text-small text-text-muted block mb-1">Body</label>
+          <textarea value={body} onChange={e => setBody(e.target.value)} placeholder="Full injection text..." className="input-field h-24 resize-none mb-4" />
+          <button onClick={create} className="btn-primary px-4 py-2">Save Snippet</button>
+        </div>
+      )}
+      <div className="space-y-3">
+        {snippets.map(s => (
+          <div key={s.id} className="card p-4 flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <code className="text-body font-mono text-primary bg-primary/10 px-2 py-0.5 rounded">{s.prefix}</code>
+                <span className="text-small text-text-secondary">{s.description}</span>
+              </div>
+              <p className="text-small text-text-muted truncate">{s.body}</p>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button onClick={() => { setPrefix(s.prefix); setDesc(s.description || ''); setBody(s.body); setEditingId(s.id!); setShowForm(true); }}
+                className="btn-icon w-8 h-8 hover:text-primary">✏️</button>
+              <button onClick={() => { if (s.id) send('DELETE_SNIPPET', { id: s.id }).then(load); }}
+                className="btn-icon w-8 h-8 hover:text-accent-red">🗑️</button>
+            </div>
+          </div>
+        ))}
+        {snippets.length === 0 && <div className="text-center py-12 text-text-muted"><span className="text-3xl block mb-2">📌</span><p>No snippets yet.</p></div>}
+      </div>
+    </div>
+  );
+}
+
+// ═══ Prompt Library ═══
+function LibraryView() {
+  const [history, setHistory] = useState<any[]>([]);
+  useEffect(() => { send('GET_PROMPT_HISTORY', { limit: 50 }).then(h => setHistory(h || [])).catch(() => {}); }, []);
+
+  return (
+    <div>
+      <h2 className="text-h1 font-bold mb-6">Prompt Library</h2>
+      <div className="space-y-3">
+        {history.map((e: any, i: number) => (
+          <div key={e.id || i} className="card p-4">
+            <p className="text-small text-text-secondary truncate mb-2">{e.originalPrompt?.slice(0, 120)}...</p>
+            <div className="flex gap-3 text-small text-text-muted">
+              <ScorePill score={e.score} />
+              <span>{e.provider}</span><span>·</span><span>{e.iterations} iter</span><span>·</span>
+              <span>{new Date(e.createdAt).toLocaleDateString()}</span>
+            </div>
+          </div>
+        ))}
+        {history.length === 0 && <div className="text-center py-12 text-text-muted"><span className="text-3xl block mb-2">📚</span><p>No prompts refined yet.</p></div>}
+      </div>
+    </div>
+  );
+}
+
+function ScorePill({ score }: { score: number }) {
+  const color = score >= 75 ? 'bg-accent-green/15 text-accent-green' : score >= 50 ? 'bg-accent-yellow-bg text-accent-yellow' : 'bg-accent-red-bg text-accent-red';
+  return <span className={`inline-flex px-2 py-0.5 rounded-full text-small font-medium ${color}`}>Score: {score}</span>;
+}
+
+// ═══ Analytics (recharts) ═══
+function AnalyticsView() {
+  const [history, setHistory] = useState<any[]>([]);
+  useEffect(() => { send('GET_PROMPT_HISTORY', { limit: 100 }).then(h => setHistory(h || [])).catch(() => {}); }, []);
+
+  // Aggregate data for charts
+  const providerCounts: Record<string, number> = {};
+  let totalScore = 0;
+  history.forEach((e: any) => {
+    providerCounts[e.provider] = (providerCounts[e.provider] || 0) + 1;
+    totalScore += e.score || 0;
+  });
+  const avgScore = history.length ? Math.round(totalScore / history.length) : 0;
+
+  const pieData = Object.entries(providerCounts).map(([name, value]) => ({ name, value }));
+  const COLORS = ['#2563EB', '#10B981', '#FBBF24', '#EF4444'];
+
+  // Score distribution
+  const scoreBuckets = [
+    { range: '0-25', count: history.filter((e: any) => e.score < 25).length },
+    { range: '25-50', count: history.filter((e: any) => e.score >= 25 && e.score < 50).length },
+    { range: '50-75', count: history.filter((e: any) => e.score >= 50 && e.score < 75).length },
+    { range: '75-100', count: history.filter((e: any) => e.score >= 75).length },
+  ];
+
+  return (
+    <div>
+      <h2 className="text-h1 font-bold mb-6">Analytics</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <StatCard icon="📝" label="Prompts Processed" value={String(history.length)} color="text-primary" />
+        <StatCard icon="📊" label="Average Score" value={avgScore ? String(avgScore) : '—'} color="text-accent-green" />
+        <StatCard icon="⚡" label="Total Tokens" value={history.reduce((s: number, e: any) => s + (e.tokensUsed || 0), 0).toLocaleString()} color="text-accent-yellow" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Score Distribution Chart */}
+        <div className="card p-6">
+          <h3 className="text-h2 font-semibold mb-4">Score Distribution</h3>
+          {history.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={scoreBuckets}>
+                <XAxis dataKey="range" stroke="#64748B" fontSize={12} />
+                <YAxis stroke="#64748B" fontSize={12} />
+                <Tooltip contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8, color: '#F8FAFC' }} />
+                <Bar dataKey="count" fill="#2563EB" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : <EmptyChart />}
+        </div>
+
+        {/* Provider Usage Pie */}
+        <div className="card p-6">
+          <h3 className="text-h2 font-semibold mb-4">Model Usage</h3>
+          {pieData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                  {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                </Pie>
+                <Tooltip contentStyle={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 8, color: '#F8FAFC' }} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : <EmptyChart />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ icon, label, value, color }: { icon: string; label: string; value: string; color: string }) {
+  return (
+    <div className="card p-5">
+      <div className="flex items-center gap-3 mb-2"><span className="text-2xl">{icon}</span><span className="text-small text-text-muted">{label}</span></div>
+      <span className={`text-h1 font-bold ${color}`}>{value}</span>
+    </div>
+  );
+}
+
+function EmptyChart() {
+  return <div className="h-[200px] flex items-center justify-center text-text-muted text-small">No data yet. Start refining prompts!</div>;
+}
+
+// ═══ Context Lab ═══
+function ContextLabView() {
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [input, setInput] = useState('');
+  const [status, setStatus] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    send<Profile[]>('GET_ALL_PROFILES').then(p => {
+      setProfiles(p || []);
+      const active = p?.find((pr: Profile) => pr.isActive);
+      if (active?.id) setSelectedId(active.id);
+    }).catch(() => {});
+  }, []);
+
+  const feedContext = async () => {
+    if (!input.trim() || !selectedId) return;
+    setLoading(true);
+    try {
+      const result = await send('SAVE_CONTEXT', { profileId: selectedId, context: input, source: 'manual' });
+      setStatus(result?.truncated ? `✅ Added (truncated to 4000 tokens, ${result.tokenCount} tokens now)` : `✅ Context added! (${result?.tokenCount || '?'} tokens)`);
+      setInput('');
+    } catch { setStatus('❌ Failed to save.'); }
+    setLoading(false);
+    setTimeout(() => setStatus(''), 4000);
+  };
+
+  return (
+    <div>
+      <h2 className="text-h1 font-bold mb-2">Context Lab</h2>
+      <p className="text-body text-text-secondary mb-6">Feed context to a profile's Context.md. Enforced at 4000 tokens (gpt-tokenizer).</p>
+      <div className="card p-6">
+        <label className="text-small text-text-muted block mb-2">Target Profile</label>
+        <select value={selectedId ?? ''} onChange={e => setSelectedId(Number(e.target.value))} className="input-field w-full mb-4">
+          {profiles.map(p => <option key={p.id} value={p.id}>{p.icon} {p.name} {p.isActive ? '(Active)' : ''}</option>)}
+        </select>
+        <label className="text-small text-text-muted block mb-2">Context Text</label>
+        <textarea value={input} onChange={e => setInput(e.target.value)} placeholder="Paste notes, docs, or context..." className="input-field w-full h-40 resize-none font-mono text-small mb-2" />
+        <span className="text-small text-text-muted block mb-4">~{Math.ceil(input.length / 4)} estimated tokens</span>
+        <div className="flex items-center gap-3">
+          <button onClick={feedContext} disabled={loading || !input.trim()} className="btn-primary px-6 py-2.5">{loading ? '⏳ Processing...' : '📥 Feed Context'}</button>
+          {status && <span className="text-small animate-fade-in">{status}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══ Settings ═══
+function SettingsView() {
+  const [groqKey, setGroqKey] = useState('');
+  const [masked, setMasked] = useState(true);
+  const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
+  const [activeProvider, setActiveProvider] = useState('groq');
+  const [status, setStatus] = useState('');
+  const [downloadProgress, setDownloadProgress] = useState<{ text: string, progress: number } | null>(null);
+  const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
+  const [downloadedModels, setDownloadedModels] = useState<string[]>([]);
+  const [webGpuActiveModel, setWebGpuActiveModel] = useState<string | null>(null);
+
+  useEffect(() => {
+    chrome.storage.sync.get('groqApiKey', r => { if (r.groqApiKey) setGroqKey(r.groqApiKey); });
+    chrome.storage.local.get(['ollamaBaseUrl', 'activeProvider', 'downloadedModels'], r => {
+      if (r.ollamaBaseUrl) setOllamaUrl(r.ollamaBaseUrl);
+      if (r.activeProvider) setActiveProvider(r.activeProvider);
+      if (r.downloadedModels) setDownloadedModels(r.downloadedModels);
+    });
+
+    // Use WEBGPU_GET_STATE routed through SW (not direct offscreen bypass)
+    send('WEBGPU_GET_STATE').then((data: any) => {
+      if (data?.model && data?.state === 'hot') setWebGpuActiveModel(data.model);
+    }).catch(() => {});
+
+    const listener = (msg: any) => {
+      if (msg.type === 'MODEL_STATE_CHANGED' && msg.payload?.state === 'loading') {
+        setDownloadProgress({ text: msg.payload.text, progress: msg.payload.progress });
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, []);
+
+  const flash = (msg: string) => { setStatus(msg); setTimeout(() => setStatus(''), 3000); };
+
+  const loadModel = async (modelId: string) => {
+    setDownloadingModel(modelId);
+    setDownloadProgress({ text: 'Starting download...', progress: 0 });
+    try {
+      await send('LOAD_MODEL', { model: modelId });
+      flash(`✅ Loaded ${modelId}`);
+      setWebGpuActiveModel(modelId);
+      
+      setDownloadedModels(prev => {
+        if (prev.includes(modelId)) return prev;
+        const newArr = [...prev, modelId];
+        chrome.storage.local.set({ downloadedModels: newArr });
+        return newArr;
+      });
+      
+    } catch (e: any) {
+      flash(`❌ Error: ${e.message}`);
+    } finally {
+      setDownloadingModel(null);
+      setDownloadProgress(null);
+    }
+  };
+
+  return (
+    <div>
+      <h2 className="text-h1 font-bold mb-6">Models &amp; Settings</h2>
+
+      {/* Provider Selection */}
+      <div className="card p-6 mb-4">
+        <h3 className="text-h2 font-semibold mb-4">Active Model Provider</h3>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { key: 'groq', label: 'Groq Cloud', icon: '☁️', desc: 'Fastest cloud inference' },
+            { key: 'ollama', label: 'Ollama', icon: '🏠', desc: 'Local, privacy-first' },
+            { key: 'webgpu', label: 'WebGPU', icon: '🧠', desc: 'In-browser GPU' },
+          ].map(({ key, label, icon, desc }) => (
+            <button key={key}
+              onClick={() => { send('SET_ACTIVE_PROVIDER', { provider: key }); setActiveProvider(key); flash(`✅ Switched to ${label}`); }}
+              className={`p-4 rounded-xl text-left transition-all cursor-pointer border
+                ${activeProvider === key ? 'border-primary bg-primary/10 shadow-glow-sm' : 'border-border-default hover:border-primary/30 bg-transparent'}`}>
+              <span className="text-2xl block mb-2">{icon}</span>
+              <span className="text-body font-semibold block">{label}</span>
+              <span className="text-small text-text-muted">{desc}</span>
+              {activeProvider === key && <span className="text-small text-primary font-medium block mt-1">✓ Active</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Groq Key */}
+      <div className="card p-6 mb-4">
+        <h3 className="text-h2 font-semibold mb-3">Groq API Key</h3>
+        <p className="text-small text-text-muted mb-3">From <a href="https://console.groq.com" target="_blank" className="text-primary hover:underline">console.groq.com</a></p>
+        <div className="flex gap-2">
+          <div className="flex-1 relative">
+            <input type={masked ? 'password' : 'text'} value={groqKey} onChange={e => setGroqKey(e.target.value)} placeholder="gsk_..." className="input-field pr-10" />
+            <button onClick={() => setMasked(!masked)} className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer bg-transparent border-none">{masked ? '👁️' : '🙈'}</button>
+          </div>
+          <button onClick={() => { chrome.storage.sync.set({ groqApiKey: groqKey }); flash('✅ API key saved!'); }} className="btn-primary px-4 py-2 shrink-0">Save</button>
+        </div>
+      </div>
+
+      {/* Ollama */}
+      <div className="card p-6 mb-4">
+        <h3 className="text-h2 font-semibold mb-3">Ollama Configuration</h3>
+        <div className="flex gap-2">
+          <input type="text" value={ollamaUrl} onChange={e => setOllamaUrl(e.target.value)} className="input-field flex-1" />
+          <button onClick={() => { chrome.storage.local.set({ ollamaBaseUrl: ollamaUrl }); flash('✅ Ollama URL saved!'); }} className="btn-primary px-4 py-2 shrink-0">Save</button>
+        </div>
+      </div>
+
+      {/* WebGPU / Offline Models */}
+      <div className="card p-6 mb-4">
+        <h3 className="text-h2 font-semibold mb-1">Offline Models (WebGPU)</h3>
+        <p className="text-small text-text-muted mb-4">Browser-compatible models. Recommended: Qwen2.5-0.5B or Phi-3-mini for best performance.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {prebuiltAppConfig.model_list.filter(m => [
+            'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',
+            'Qwen2.5-1.5B-Instruct-q4f32_1-MLC',
+            'gemma-2-2b-it-q4f32_1-MLC',
+            'Phi-3-mini-4k-instruct-q4f16_1-MLC',
+            'TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC',
+            'stablelm-2-zephyr-1_6b-q4f16_1-MLC',
+          ].includes(m.model_id)).map((model) => (
+            <div key={model.model_id} className="border border-border-default bg-background p-4 rounded-xl flex flex-col">
+              <h4 className="text-body font-semibold mb-1" style={{ wordBreak: 'break-all' }}>{model.model_id}</h4>
+              <span className="text-small text-text-muted block mb-3">VRAM: {model.vram_required_MB ? (model.vram_required_MB / 1024).toFixed(1) + ' GB' : 'Unknown'}</span>
+              <div className="mt-auto">
+                {downloadingModel === model.model_id && downloadProgress ? (
+                  <div className="mb-2">
+                    <div className="w-full h-2 bg-surface rounded overflow-hidden mb-1">
+                      <div className="h-full bg-primary transition-all duration-300" style={{ width: `${downloadProgress.progress * 100}%` }}></div>
+                    </div>
+                    <span className="text-[10px] text-text-muted">{Math.round(downloadProgress.progress * 100)}% — {downloadProgress.text}</span>
+                  </div>
+                ) : null}
+                <button 
+                  onClick={() => loadModel(model.model_id)} 
+                  disabled={(downloadingModel === model.model_id && downloadProgress !== null && downloadProgress.progress < 1) || webGpuActiveModel === model.model_id}
+                  className={`btn-primary w-full py-1.5 text-small ${((downloadingModel === model.model_id && downloadProgress !== null && downloadProgress.progress < 1) || webGpuActiveModel === model.model_id) ? 'opacity-50 cursor-not-allowed' : ''} ${webGpuActiveModel === model.model_id ? 'bg-accent-green' : ''}`}>
+                  {webGpuActiveModel === model.model_id ? 'Active (Loaded)' : 
+                   downloadingModel === model.model_id ? 'Downloading...' : 
+                   downloadedModels.includes(model.model_id) ? 'Load Model' : 'Download Model'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {status && <div className="text-body text-center animate-fade-in py-2">{status}</div>}
+    </div>
+  );
+}
