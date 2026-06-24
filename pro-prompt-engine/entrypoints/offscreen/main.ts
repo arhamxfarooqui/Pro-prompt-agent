@@ -1,8 +1,3 @@
-<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"><title>WebLLM Offscreen</title></head>
-<body>
-<script type="module">
 /**
  * Offscreen Document — @mlc-ai/web-llm Engine Host
  *
@@ -10,52 +5,68 @@
  * Communicates with service worker via chrome.runtime messaging.
  *
  * Model lifecycle:
- *   cold → loading (engine.reload) → hot → inference → hot
- *                                   → error (catch + report)
+ *   cold → loading (CreateMLCEngine) → hot → inference → hot
+ *                                     → error (catch + report)
  *
  * Keep-alive: 20-second GPU no-op to prevent VRAM eviction.
+ *
+ * NOTE: This file is a WXT entrypoint so that bare module specifiers
+ * (e.g. '@mlc-ai/web-llm') are properly resolved by the bundler.
+ * Previously, this code lived in a raw <script> in public/offscreen.html,
+ * which broke because browsers cannot resolve bare specifiers without a bundler.
  */
 
-import { CreateMLCEngine } from '@mlc-ai/web-llm';
+import { CreateMLCEngine, type MLCEngine } from '@mlc-ai/web-llm';
 
-let engine = null;
-let modelState = 'cold'; // cold | loading | hot | error
-let currentModel = null;
+let engine: MLCEngine | null = null;
+let modelState: 'cold' | 'loading' | 'hot' | 'error' = 'cold';
+let currentModel: string | null = null;
 
 // ═══ Keep-Alive: Prevent VRAM eviction ═══
-let keepAliveInterval = null;
-let gpuDevice = null;
+let keepAliveInterval: ReturnType<typeof setInterval> | null = null;
+let gpuDevice: GPUDevice | null = null;
 
 async function initGPUKeepAlive() {
   try {
-    if (!navigator.gpu) { console.warn('[Offscreen] WebGPU not available'); return; }
+    if (!navigator.gpu) {
+      console.warn('[Offscreen] WebGPU not available');
+      return;
+    }
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) return;
     gpuDevice = await adapter.requestDevice();
     gpuDevice.lost.then(() => {
       console.warn('[Offscreen] GPU device lost — re-acquiring in 5s');
       modelState = 'cold';
+      gpuDevice = null;
       setTimeout(initGPUKeepAlive, 5000);
     });
 
-    // No-op GPU tick every 20 seconds
+    // No-op GPU tick every 20 seconds to prevent VRAM eviction
     keepAliveInterval = setInterval(() => {
       if (!gpuDevice) return;
       try {
-        const buf = gpuDevice.createBuffer({ size: 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+        const buf = gpuDevice.createBuffer({
+          size: 4,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        });
         buf.destroy();
-      } catch {}
+      } catch {
+        // GPU device may have been lost
+      }
     }, 20_000);
-  } catch (e) { console.error('[Offscreen] GPU init failed:', e); }
+  } catch (e) {
+    console.error('[Offscreen] GPU init failed:', e);
+  }
 }
 
 initGPUKeepAlive();
 
 // ═══ Message Handler ═══
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.target !== 'offscreen') return;
 
-  const handler = async () => {
+  const handler = async (): Promise<any> => {
     try {
       switch (message.type) {
         case 'WEBGPU_LOAD_MODEL': {
@@ -65,18 +76,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
           try {
             engine = await CreateMLCEngine(model, {
-              initProgressCallback: (report) => {
+              initProgressCallback: (report: { progress: number; text: string }) => {
                 console.log(`[WebLLM] ${report.text}`);
                 // Notify SW of progress
-                chrome.runtime.sendMessage({
-                  type: 'MODEL_STATE_CHANGED',
-                  payload: { state: 'loading', progress: report.progress, text: report.text },
-                }).catch(() => {});
+                chrome.runtime
+                  .sendMessage({
+                    type: 'MODEL_STATE_CHANGED',
+                    payload: {
+                      state: 'loading',
+                      progress: report.progress,
+                      text: report.text,
+                    },
+                  })
+                  .catch(() => {});
               },
             });
             modelState = 'hot';
             return { status: 'success', data: { state: 'hot', model } };
-          } catch (err) {
+          } catch (err: any) {
             modelState = 'error';
             return { error: err.message || String(err) };
           }
@@ -118,7 +135,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             // WebLLM stores models in Cache API
             const cache = await caches.open('webllm/model');
             const keys = await cache.keys();
-            const found = keys.some(key => key.url.includes(model));
+            const found = keys.some((key) => key.url.includes(model));
             return { data: { downloaded: found } };
           } catch {
             return { data: { downloaded: false } };
@@ -127,21 +144,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         case 'GET_STATE':
         case 'HEARTBEAT_PING':
-          return { status: 'alive', data: { state: modelState, model: currentModel } };
+          return {
+            status: 'alive',
+            data: { state: modelState, model: currentModel },
+          };
 
         default:
           return { error: `Unknown offscreen message type: ${message.type}` };
       }
-    } catch (err) {
+    } catch (err: any) {
       return { error: err.message || String(err) };
     }
   };
 
-  handler().then(sendResponse).catch(err => sendResponse({ error: String(err) }));
+  handler()
+    .then(sendResponse)
+    .catch((err) => sendResponse({ error: String(err) }));
   return true; // Async response
 });
 
 console.log('[Offscreen] WebLLM host ready');
-</script>
-</body>
-</html>

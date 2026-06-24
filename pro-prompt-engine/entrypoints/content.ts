@@ -27,10 +27,16 @@ export default defineContentScript({
     // CS → SW ping every 20 seconds
     // ════════════════════════════════════════
 
-    const keepAliveInterval = ctx.setInterval(() => {
-      chrome.runtime.sendMessage({ type: 'KEEP_ALIVE_PING' }).catch(() => {
+    const keepAliveInterval = ctx.setInterval(async () => {
+      try {
+        const result = await chrome.storage.local.get('activeProvider');
+        const provider = result.activeProvider || 'webgpu';
+        if (provider !== 'webgpu') return; // Only ping for WebGPU — pinging Groq/Ollama is pointless
+
+        await chrome.runtime.sendMessage({ type: 'KEEP_ALIVE_PING' });
+      } catch {
         console.warn('[Pro Prompt] SW ping failed — SW may have restarted');
-      });
+      }
     }, 20_000);
 
     // ════════════════════════════════════════

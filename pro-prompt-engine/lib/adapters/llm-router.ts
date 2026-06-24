@@ -8,7 +8,7 @@
 
 import { groqInfer, checkGroqHealth } from './groq-adapter';
 import { ollamaInfer, checkOllamaHealth } from './ollama-adapter';
-import { webgpuInfer, getWebGPUState, checkModelDownloaded } from './webgpu-adapter';
+import { webgpuInfer, getWebGPUState, checkModelDownloaded, loadWebGPUModel } from './webgpu-adapter';
 import { scrubPII } from '@lib/utils/pii-scrubber';
 import type { LLMRequest, LLMResponse, ModelProvider } from '@lib/types/llm.types';
 
@@ -79,7 +79,7 @@ export async function routeInference(request: LLMRequest): Promise<LLMResponse> 
 
 export async function getActiveProvider(): Promise<ModelProvider> {
   return new Promise((resolve) => {
-    chrome.storage.local.get('activeProvider', (r) => resolve((r.activeProvider as ModelProvider) || 'groq'));
+    chrome.storage.local.get('activeProvider', (r) => resolve((r.activeProvider as ModelProvider) || 'webgpu'));
   });
 }
 

@@ -17,10 +17,13 @@ export default defineConfig({
       'https://api.groq.com/*',
       'http://localhost:11434/*',
     ],
+    content_security_policy: {
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
+    },
     web_accessible_resources: [
       {
         matches: ['<all_urls>'],
-        resources: ['offscreen.html', '*.css'],
+        resources: ['*.css'],
       },
     ],
     options_ui: {

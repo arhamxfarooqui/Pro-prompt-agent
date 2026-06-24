@@ -44,12 +44,10 @@ export async function webgpuInfer(request: LLMRequest): Promise<LLMResponse> {
     type: 'WEBGPU_INFERENCE',
     payload: {
       messages: [
-        { 
-          role: 'user', 
-          content: request.systemPrompt 
-            ? `${request.systemPrompt}\n\n${request.userPrompt}` 
-            : request.userPrompt 
-        }
+        ...(request.systemPrompt
+          ? [{ role: 'system', content: request.systemPrompt }]
+          : []),
+        { role: 'user', content: request.userPrompt },
       ],
       maxTokens: request.maxTokens ?? 1024,
       temperature: request.temperature ?? 0.7,

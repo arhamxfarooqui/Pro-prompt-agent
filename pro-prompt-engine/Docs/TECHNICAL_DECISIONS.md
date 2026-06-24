@@ -92,3 +92,51 @@ To ensure high-quality prompt output, we implemented an autonomous sequence (`li
 - **Edge Case Coverage:**
   - What if the Scorer hallucinates standard text instead of the requested JSON score schema?
   - *Mitigation:* We use a `try/catch` and a fallback Regex pattern (`/(?:"?score"?\s*:\s*)?(\d+)/i`) to forcibly extract any numeric score the model spits out before failing. 
+
+---
+
+## 7. Offscreen Document as WXT Entrypoint (Bundled)
+
+### **The Problem:**
+The offscreen document hosts WebLLM (`@mlc-ai/web-llm`) for in-browser GPU inference. Initially, this was a raw HTML file (`public/offscreen.html`) with an inline `<script type="module">` using `import { CreateMLCEngine } from '@mlc-ai/web-llm'`.
+
+### **Why it broke:**
+Browsers **cannot resolve bare module specifiers** (like `@mlc-ai/web-llm`) without a bundler. Only tools like Vite/Webpack/Rollup can map `@mlc-ai/web-llm` → `node_modules/@mlc-ai/web-llm/...`. A raw `<script type="module">` in an HTML file tries to fetch the string `@mlc-ai/web-llm` as a URL, which fails silently. The entire WebGPU pipeline was dead — no model ever loaded, state was always `cold`, and every LLM feature fell through to the Groq fallback.
+
+### **The Fix: WXT Entrypoint**
+The offscreen document is now `entrypoints/offscreen/index.html` + `entrypoints/offscreen/main.ts`. WXT recognizes this as an entrypoint and bundles it with Vite, properly resolving all bare specifiers. The compiled output is a working `offscreen.html` at the extension root.
+
+**Key lesson:** Any HTML page in a Chrome extension that needs to `import` from `node_modules` must be processed by the bundler — it cannot live in `public/` as a raw file.
+
+---
+
+## 8. CSP `wasm-unsafe-eval` Requirement
+
+### **The Problem:**
+Manifest V3's default Content Security Policy blocks WebAssembly execution. WebLLM uses WASM modules internally for GPU shader compilation and tensor operations.
+
+### **The Fix:**
+Added `content_security_policy.extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"` to the manifest. This matches the Gray Matter extension's CSP configuration. The `wasm-unsafe-eval` directive specifically allows WASM compilation without opening up full `unsafe-eval` (which would be a security risk).
+
+---
+
+## 9. Conditional Keep-Alive (WebGPU-only)
+
+### **The Problem:**
+The bidirectional keep-alive system (Content Script → Service Worker pings, SW → Tab heartbeats, Alarm-based offscreen checks) was firing unconditionally regardless of which LLM provider was active. This meant:
+- Pinging Groq Cloud every 20 seconds — pointless, Groq is stateless.
+- Pinging Ollama every 20 seconds — pointless, Ollama manages its own lifecycle.
+- Creating/maintaining the offscreen document when WebGPU wasn't even in use.
+
+### **The Fix:**
+Both the Content Script ping interval and the Service Worker heartbeat now check `chrome.storage.local.activeProvider` before each tick. If the provider is not `webgpu`, the ping is skipped. The `sw-keepalive` alarm still fires (keeping the SW alive for all providers), but `ensureOffscreen()` is only called when WebGPU is active.
+
+---
+
+## 10. Default Provider: WebGPU (Local-First)
+
+### **The Problem:**
+The extension defaulted to `groq` as the active provider. On fresh installs with no API key configured, *every* inference request failed because Groq requires authentication. This made the extension appear completely non-functional.
+
+### **The Fix:**
+Default provider changed to `webgpu` in all locations: `llm-router.ts`, `popup/App.tsx`, and `options/App.tsx`. The extension is designed as a local-first tool — WebGPU should be the primary provider, with Groq as a cloud fallback after the user explicitly configures an API key.

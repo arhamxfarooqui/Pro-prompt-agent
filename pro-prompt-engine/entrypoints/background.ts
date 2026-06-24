@@ -25,10 +25,16 @@ export default defineBackground(() => {
 
   // ════════════════════════════════════════
   // Bidirectional Keep-Alive System
+  // (Only active when WebGPU is the selected provider —
+  //  pinging Groq/Ollama serves no purpose)
   // ════════════════════════════════════════
 
-  // SW-side heartbeat: ping all content scripts every 20 seconds
-  setInterval(() => {
+  // SW-side heartbeat: ping all content scripts every 20 seconds (WebGPU only)
+  setInterval(async () => {
+    const result = await chrome.storage.local.get('activeProvider');
+    const provider = result.activeProvider || 'webgpu';
+    if (provider !== 'webgpu') return; // Skip heartbeat for non-WebGPU providers
+
     chrome.tabs.query({ status: 'complete' }, (tabs) => {
       for (const tab of tabs) {
         if (tab.id) {
@@ -43,12 +49,17 @@ export default defineBackground(() => {
   // Alarm-based backup heartbeat (survives SW sleep in edge cases)
   chrome.alarms.create('sw-keepalive', { periodInMinutes: 0.4 }); // ~24 seconds
 
-  chrome.alarms.onAlarm.addListener((alarm) => {
+  chrome.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name === 'sw-keepalive') {
       console.log('[SW] Alarm heartbeat tick');
     }
     if (alarm.name === 'webgpu-heartbeat') {
-      ensureOffscreen().catch(console.error);
+      // Only ensure offscreen if WebGPU is active provider
+      const result = await chrome.storage.local.get('activeProvider');
+      const provider = result.activeProvider || 'webgpu';
+      if (provider === 'webgpu') {
+        ensureOffscreen().catch(console.error);
+      }
     }
   });
 

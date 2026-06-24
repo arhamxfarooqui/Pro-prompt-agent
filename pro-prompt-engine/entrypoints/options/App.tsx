@@ -400,7 +400,7 @@ function SettingsView() {
   const [groqKey, setGroqKey] = useState('');
   const [masked, setMasked] = useState(true);
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
-  const [activeProvider, setActiveProvider] = useState('groq');
+  const [activeProvider, setActiveProvider] = useState('webgpu');
   const [status, setStatus] = useState('');
   const [downloadProgress, setDownloadProgress] = useState<{ text: string, progress: number } | null>(null);
   const [downloadingModel, setDownloadingModel] = useState<string | null>(null);

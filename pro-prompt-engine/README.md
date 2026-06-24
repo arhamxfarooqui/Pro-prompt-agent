@@ -59,8 +59,10 @@ Located in `lib/agents/comprehension.ts`, this specialized agent is used for: **
 ### Challenge 1: WebGPU Performance in Service Workers
 
 - **Problem**: WebGPU, the low-level graphics API needed for local AI models, cannot run in a standard Web Worker. It requires a full DOM environment.
-- **Solution**: **Offscreen Documents**. We use `chrome.offscreen.createDocument` to spin up a hidden HTML page (`public/offscreen.html`) that hosts the WebGPU engine. This allows heavy inference to happen in a dedicated background page without freezing the UI.
-- **Edge Case (Background Termination)**: Chromium kills Service Workers after 30 seconds of inactivity. To prevent this, we implemented a **"Ping-Pong" Keep-Alive system**: Content scripts constantly send messages to the Service Worker, and the Service Worker keeps the Offscreen Document alive. If no tabs are open, the Service Worker uses `chrome.alarms` to periodically wake itself up.
+- **Solution**: **Offscreen Documents**. We use `chrome.offscreen.createDocument` to spin up a hidden HTML page (`entrypoints/offscreen/`) that hosts the WebGPU engine. This is implemented as a **WXT entrypoint** (not a raw HTML file) because WebLLM uses bare module specifiers that must be resolved by the bundler. This allows heavy inference to happen in a dedicated background page without freezing the UI.
+- **Edge Case (Background Termination)**: Chromium kills Service Workers after 30 seconds of inactivity. To prevent this, we implemented a **"Ping-Pong" Keep-Alive system** that is **only active when WebGPU is the selected provider** (pinging Groq or Ollama serves no purpose): Content scripts check the active provider before sending messages to the Service Worker, and the Service Worker keeps the Offscreen Document alive. If no tabs are open, the Service Worker uses `chrome.alarms` to periodically wake itself up.
+- **CSP Requirement**: The manifest includes `wasm-unsafe-eval` in the Content Security Policy because WebLLM requires WASM execution, which MV3 blocks by default.
+- **Default Provider**: The extension defaults to `webgpu` (local-first). Groq cloud is available as a fallback once the user configures an API key.
 
 ### Challenge 2: Floating Toolbar Rendering on Dynamic Pages
 

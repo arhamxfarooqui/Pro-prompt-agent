@@ -19,7 +19,7 @@ function sendToActiveTab(type: string, payload?: unknown) {
 
 export default function App() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [activeProvider, setActiveProvider] = useState('groq');
+  const [activeProvider, setActiveProvider] = useState('webgpu');
   // Score starts null — only updated when user explicitly scores
   const [scoreData, setScoreData] = useState<{ score: number; critique: string } | null>(null);
   const [showCritique, setShowCritique] = useState(false);
@@ -30,7 +30,7 @@ export default function App() {
   useEffect(() => {
     send<Profile[]>('GET_ALL_PROFILES').then(p => setProfiles(p || [])).catch(() => {});
     chrome.storage.local.get(['activeProvider', 'autocompleteEnabled'], (r) => {
-      setActiveProvider(r.activeProvider || 'groq');
+      setActiveProvider(r.activeProvider || 'webgpu');
       if (r.autocompleteEnabled !== undefined) setAutocomplete(r.autocompleteEnabled);
     });
   }, []);

@@ -54,7 +54,9 @@ flowchart TD
 
 ## 3. WebGPU Bidirectional Keep-Alive System
 
-Manifest V3 forcibly terminates service workers after 30 seconds of inactivity. To prevent the WebGPU `engine` from being dropped from VRAM, we implemented a bidirectional heartbeat.
+Manifest V3 forcibly terminates service workers after 30 seconds of inactivity. To prevent the WebGPU `engine` from being dropped from VRAM, we implemented a bidirectional heartbeat. **This system is only active when WebGPU is the selected provider** — pinging for Groq or Ollama serves no purpose.
+
+> **Note:** The offscreen document (`entrypoints/offscreen/`) is a WXT entrypoint, not a raw HTML file. This is critical because it imports `@mlc-ai/web-llm` which uses bare module specifiers that browsers cannot resolve without a bundler. WXT/Vite bundles the TypeScript entrypoint into a working `offscreen.html` with resolved imports.
 
 ```mermaid
 sequenceDiagram
@@ -63,12 +65,15 @@ sequenceDiagram
     participant CS as Content Script
     participant Off as Offscreen (WebLLM)
 
-    Note over SW, Off: 20-second Keep-Alive Cycle
+    Note over SW, Off: 20-second Keep-Alive Cycle (WebGPU only)
+    
+    CS->>CS: Check activeProvider === 'webgpu'
     
     Alarm->>SW: Tick (Wake-up)
+    SW->>SW: Check activeProvider === 'webgpu'
     SW->>Off: ensureOffscreen() / ping
     
-    loop Every 20s
+    loop Every 20s (only when activeProvider === 'webgpu')
         CS->>SW: KEEP_ALIVE_PING
         SW-->>CS: KEEP_ALIVE_PONG
         

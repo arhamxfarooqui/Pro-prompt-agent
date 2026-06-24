@@ -15,7 +15,7 @@ export type MessageType =
   | 'GET_PROVIDER_STATUS' | 'SET_ACTIVE_PROVIDER' | 'CHECK_PII'
   | 'GET_PROMPT_HISTORY' | 'MODEL_STATE_CHANGED' | 'PROVIDER_CHANGED'
   | 'KEEP_ALIVE_PING' | 'KEEP_ALIVE_PONG' | 'SW_HEARTBEAT' | 'SW_HEARTBEAT_ACK'
-  | 'MODEL_DOWNLOAD_REQUIRED';
+  | 'MODEL_DOWNLOAD_REQUIRED' | 'WEBGPU_GET_STATE' | 'OPEN_DASHBOARD';
 
 export interface ExtensionResponse<T = unknown> {
   status: 'success' | 'error' | 'not_implemented' | 'unknown_type';
