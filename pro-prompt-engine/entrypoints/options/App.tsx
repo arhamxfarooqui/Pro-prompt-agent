@@ -8,6 +8,7 @@ import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import type { Profile } from '@lib/types/profile.types';
 import type { Snippet } from '@lib/types/snippet.types';
+import { WEBGPU_MODELS } from '@lib/types/llm.types';
 import { prebuiltAppConfig } from '@mlc-ai/web-llm';
 
 function send<T = any>(type: string, payload?: unknown): Promise<T> {
@@ -76,7 +77,7 @@ function ProfilesView() {
   const activate = async (p: Profile) => {
     if (!p.id) return;
     await send('SET_ACTIVE_PROFILE', { id: p.id });
-    setProfiles(prev => prev.map(x => ({ ...x, isActive: x.id === p.id })));
+    setProfiles(prev => prev.map(x => ({ ...x, isActive: x.id === p.id ? 1 : 0 })));
   };
 
   return (
@@ -85,7 +86,7 @@ function ProfilesView() {
         <div><h2 className="text-h1 font-bold">Profiles</h2><p className="text-body text-text-secondary mt-1">Manage your prompt engineering personas (4-file system).</p></div>
         <button onClick={() => {
             const newProfile: Profile = {
-              name: 'New Profile', description: 'Describe your persona here.', icon: '🧑‍💻', isActive: false, isCustom: true,
+              name: 'New Profile', description: 'Describe your persona here.', icon: '🧑‍💻', isActive: 0, isCustom: true,
               contextMd: '', promptGuidelinesMd: '', profileDescriptionMd: '', scoringGuidelinesMd: '',
               agentWeights: { refactor: 1, scorer: 1, generator: 1, comprehension: 1 }, createdAt: Date.now(), updatedAt: Date.now()
             };
@@ -398,6 +399,7 @@ function ContextLabView() {
 // ═══ Settings ═══
 function SettingsView() {
   const [groqKey, setGroqKey] = useState('');
+  const [groqModel, setGroqModel] = useState('llama-3.3-70b-versatile');
   const [masked, setMasked] = useState(true);
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
   const [activeProvider, setActiveProvider] = useState('webgpu');
@@ -406,14 +408,29 @@ function SettingsView() {
   const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
   const [downloadedModels, setDownloadedModels] = useState<string[]>([]);
   const [webGpuActiveModel, setWebGpuActiveModel] = useState<string | null>(null);
+  const [migrationNotice, setMigrationNotice] = useState(false);
 
   useEffect(() => {
-    chrome.storage.sync.get('groqApiKey', r => { if (r.groqApiKey) setGroqKey(r.groqApiKey); });
-    chrome.storage.local.get(['ollamaBaseUrl', 'activeProvider', 'downloadedModels'], r => {
-      if (r.ollamaBaseUrl) setOllamaUrl(r.ollamaBaseUrl);
-      if (r.activeProvider) setActiveProvider(r.activeProvider);
-      if (r.downloadedModels) setDownloadedModels(r.downloadedModels);
-    });
+    // [Phase 1 PRE-5] the key now lives in storage.local only. groq-adapter.ts
+    // performs the one-time migration out of storage.sync on first read; here
+    // we just read local and show the one-time notice if it fired.
+    chrome.storage.local.get(
+      ['groqApiKey', 'groqModel', 'keyMigrationNotice', 'keyMigrationNoticeShown'],
+      (r: { groqApiKey?: string; groqModel?: string; keyMigrationNotice?: number; keyMigrationNoticeShown?: boolean }) => {
+        if (r.groqApiKey) setGroqKey(r.groqApiKey);
+        if (r.groqModel) setGroqModel(r.groqModel);
+        if (r.keyMigrationNotice && !r.keyMigrationNoticeShown) {
+          setMigrationNotice(true);
+          chrome.storage.local.set({ keyMigrationNoticeShown: true });
+        }
+      });
+    chrome.storage.local.get(
+      ['ollamaBaseUrl', 'activeProvider', 'downloadedModels'],
+      (r: { ollamaBaseUrl?: string; activeProvider?: string; downloadedModels?: string[] }) => {
+        if (r.ollamaBaseUrl) setOllamaUrl(r.ollamaBaseUrl);
+        if (r.activeProvider) setActiveProvider(r.activeProvider);
+        if (r.downloadedModels) setDownloadedModels(r.downloadedModels);
+      });
 
     // Use WEBGPU_GET_STATE routed through SW (not direct offscreen bypass)
     send('WEBGPU_GET_STATE').then((data: any) => {
@@ -458,6 +475,13 @@ function SettingsView() {
     <div>
       <h2 className="text-h1 font-bold mb-6">Models &amp; Settings</h2>
 
+      {migrationNotice && (
+        <div className="card p-4 mb-4 border border-accent-yellow/40 bg-accent-yellow-bg text-small text-text-primary flex items-start justify-between gap-4">
+          <p>Your API key was moved to this device only. It was previously synced to every browser signed into your Google account. If you used Pro Prompt on another machine, you will need to re-enter it there.</p>
+          <button onClick={() => setMigrationNotice(false)} className="btn-icon w-6 h-6 shrink-0">✕</button>
+        </div>
+      )}
+
       {/* Provider Selection */}
       <div className="card p-6 mb-4">
         <h3 className="text-h2 font-semibold mb-4">Active Model Provider</h3>
@@ -483,13 +507,21 @@ function SettingsView() {
       {/* Groq Key */}
       <div className="card p-6 mb-4">
         <h3 className="text-h2 font-semibold mb-3">Groq API Key</h3>
-        <p className="text-small text-text-muted mb-3">From <a href="https://console.groq.com" target="_blank" className="text-primary hover:underline">console.groq.com</a></p>
-        <div className="flex gap-2">
+        <p className="text-small text-text-muted mb-3">From <a href="https://console.groq.com" target="_blank" className="text-primary hover:underline">console.groq.com</a>. Stored on this device only — it is never synced to your Google account.</p>
+        <div className="flex gap-2 mb-3">
           <div className="flex-1 relative">
             <input type={masked ? 'password' : 'text'} value={groqKey} onChange={e => setGroqKey(e.target.value)} placeholder="gsk_..." className="input-field pr-10" />
             <button onClick={() => setMasked(!masked)} className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer bg-transparent border-none">{masked ? '👁️' : '🙈'}</button>
           </div>
-          <button onClick={() => { chrome.storage.sync.set({ groqApiKey: groqKey }); flash('✅ API key saved!'); }} className="btn-primary px-4 py-2 shrink-0">Save</button>
+          <button onClick={() => { chrome.storage.local.set({ groqApiKey: groqKey }); flash('✅ API key saved to this device!'); }} className="btn-primary px-4 py-2 shrink-0">Save</button>
+        </div>
+        {/* Editable model id: a hard-coded provider model goes stale when Groq
+            decommissions it, and a user should not need an extension update
+            to point at the replacement. */}
+        <label className="text-small text-text-muted block mb-1">Model</label>
+        <div className="flex gap-2">
+          <input type="text" value={groqModel} onChange={e => setGroqModel(e.target.value)} placeholder="llama-3.3-70b-versatile" className="input-field flex-1" />
+          <button onClick={() => { chrome.storage.local.set({ groqModel }); flash('✅ Model saved!'); }} className="btn-primary px-4 py-2 shrink-0">Save</button>
         </div>
       </div>
 
@@ -507,14 +539,7 @@ function SettingsView() {
         <h3 className="text-h2 font-semibold mb-1">Offline Models (WebGPU)</h3>
         <p className="text-small text-text-muted mb-4">Browser-compatible models. Recommended: Qwen2.5-0.5B or Phi-3-mini for best performance.</p>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {prebuiltAppConfig.model_list.filter(m => [
-            'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',
-            'Qwen2.5-1.5B-Instruct-q4f32_1-MLC',
-            'gemma-2-2b-it-q4f32_1-MLC',
-            'Phi-3-mini-4k-instruct-q4f16_1-MLC',
-            'TinyLlama-1.1B-Chat-v1.0-q4f32_1-MLC',
-            'stablelm-2-zephyr-1_6b-q4f16_1-MLC',
-          ].includes(m.model_id)).map((model) => (
+          {prebuiltAppConfig.model_list.filter(m => (WEBGPU_MODELS as readonly string[]).includes(m.model_id)).map((model) => (
             <div key={model.model_id} className="border border-border-default bg-background p-4 rounded-xl flex flex-col">
               <h4 className="text-body font-semibold mb-1" style={{ wordBreak: 'break-all' }}>{model.model_id}</h4>
               <span className="text-small text-text-muted block mb-3">VRAM: {model.vram_required_MB ? (model.vram_required_MB / 1024).toFixed(1) + ' GB' : 'Unknown'}</span>

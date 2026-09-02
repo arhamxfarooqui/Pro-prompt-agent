@@ -1,0 +1,37 @@
+<!doctype html>
+<!--
+  Grant/revoke + snippet-expansion fixture (§8.2). window.__proPromptPing
+  bridges to entrypoints/agent.ts's isolated-world content script via
+  CustomEvents on `document` — see that file's header comment for why a
+  direct window property does not cross the isolated/main world boundary.
+-->
+<html lang="en">
+<head><meta charset="utf-8"><title>Basic Form</title></head>
+<body>
+  <h1>Basic Form</h1>
+  <textarea id="comment-box" placeholder="Type a comment... try /dev"></textarea>
+
+  <script>
+    window.__proPromptPing = function (timeoutMs) {
+      timeoutMs = timeoutMs || 1500;
+      return new Promise(function (resolve) {
+        var done = false;
+        function onPong() {
+          if (done) return;
+          done = true;
+          document.removeEventListener('pp-pong', onPong);
+          resolve(true);
+        }
+        document.addEventListener('pp-pong', onPong);
+        document.dispatchEvent(new CustomEvent('pp-ping'));
+        setTimeout(function () {
+          if (done) return;
+          done = true;
+          document.removeEventListener('pp-pong', onPong);
+          resolve(false);
+        }, timeoutMs);
+      });
+    };
+  </script>
+</body>
+</html>

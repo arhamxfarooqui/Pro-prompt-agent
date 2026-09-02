@@ -1,12 +1,57 @@
 /**
  * Snippet Manager
- * Detects "@prefix" triggers in text fields and shows a snippet insertion UI.
+ * Detects "/prefix" triggers in text fields and shows a snippet insertion UI.
+ *
+ * [Phase 1 PRE-2 §5.2] The popover now mounts in a closed-mode shadow root
+ * instead of a bare document.body div. A bare div is reachable by any page
+ * script — it can read, style or remove it, and the page's own CSS reset can
+ * distort it. mode: 'closed' makes host.shadowRoot null to page script, so
+ * the page cannot walk into the popover; all: initial on the host neutralises
+ * inherited page styles. isValidTarget() now defers to the shared sensitive-
+ * field classifier (lib/page/sensitive.ts) instead of accepting every input.
  */
 
 import type { Snippet } from '@lib/types/snippet.types';
+import { classifySensitive } from '@lib/page/sensitive';
+
+const SNIPPET_POPOVER_CSS = `
+  .pp-snippet-popup {
+    position: absolute;
+    z-index: 2147483647;
+    background: #0F172A;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+    color: #F8FAFC;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 13px;
+    min-width: 200px;
+    max-width: 300px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .pp-snippet-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #1E293B;
+    display: flex;
+    flex-direction: column;
+  }
+  .pp-snippet-item:hover { background: #1E293B; }
+  .pp-snippet-title { font-weight: 600; color: #3B82F6; margin-bottom: 2px; }
+  .pp-snippet-desc {
+    color: #94A3B8;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+`;
 
 export class SnippetManager {
   private activeElement: HTMLInputElement | HTMLTextAreaElement | HTMLElement | null = null;
+  private shadow: ShadowRoot | null = null;
+  private hostEl: HTMLDivElement | null = null;
   private popup: HTMLDivElement | null = null;
   private currentQuery: string = '';
   private snippets: Snippet[] = [];
@@ -19,7 +64,10 @@ export class SnippetManager {
     document.addEventListener('input', this.handleInput.bind(this), true);
     document.addEventListener('keydown', this.handleKeydown.bind(this), true);
     document.addEventListener('click', (e) => {
-      if (this.popup && !this.popup.contains(e.target as Node)) {
+      // e.target is in the page's light DOM; a closed shadow root's contents
+      // never appear in e.composedPath() to page script, but this listener
+      // runs inside our own content script so composedPath() still resolves.
+      if (this.popup && !e.composedPath().includes(this.popup)) {
         this.closePopup();
       }
     });
@@ -27,7 +75,7 @@ export class SnippetManager {
 
   private async handleInput(e: Event) {
     const target = e.target as HTMLElement;
-    if (!this.isValidTarget(target)) return;
+    if (!this.isValidTarget(target)) { this.closePopup(); return; }
     this.activeElement = target;
 
     const text = this.getText(target);
@@ -50,11 +98,12 @@ export class SnippetManager {
   }
 
   private isValidTarget(el: HTMLElement): boolean {
-    return (
-      el.tagName === 'TEXTAREA' ||
-      el.tagName === 'INPUT' ||
-      el.hasAttribute('contenteditable')
-    );
+    const isField = el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.hasAttribute('contenteditable');
+    if (!isField) return false;
+    // PRE-1/PRE-2: never offer snippet expansion into a password, payment,
+    // OTP, file or hidden field. classifySensitive is the single classifier
+    // shared with Phase 2's perception layer and Phase 4's autocomplete.
+    return classifySensitive(el) === null;
   }
 
   private getText(el: HTMLElement): string {
@@ -79,7 +128,7 @@ export class SnippetManager {
     try {
       const response = await chrome.runtime.sendMessage({
         type: 'GET_SNIPPETS',
-        payload: { query: cleanQuery }
+        payload: { query: cleanQuery },
       });
       if (response && response.status === 'success') {
         this.snippets = response.data;
@@ -89,6 +138,23 @@ export class SnippetManager {
     }
   }
 
+  /** Lazily creates the closed-shadow-root host. Never appended twice. */
+  private ensureHost(): ShadowRoot {
+    if (this.shadow) return this.shadow;
+    const host = document.createElement('div');
+    // No id. An id is a handle for page script; a random attribute is not
+    // useful to it.
+    host.style.cssText = 'all: initial; position: absolute; top: 0; left: 0; z-index: 2147483647;';
+    // documentElement, not body: some sites replace body on route change.
+    document.documentElement.appendChild(host);
+    this.shadow = host.attachShadow({ mode: 'closed' });
+    const style = document.createElement('style');
+    style.textContent = SNIPPET_POPOVER_CSS;
+    this.shadow.appendChild(style);
+    this.hostEl = host;
+    return this.shadow;
+  }
+
   private async showPopup(target: HTMLElement, query: string) {
     await this.fetchSnippets(query);
     if (this.snippets.length === 0) {
@@ -96,25 +162,11 @@ export class SnippetManager {
       return;
     }
 
+    const shadow = this.ensureHost();
     if (!this.popup) {
       this.popup = document.createElement('div');
-      this.popup.id = 'pro-prompt-snippet-popup';
-      this.popup.style.cssText = `
-        position: absolute;
-        z-index: 9999999;
-        background: #0F172A;
-        border: 1px solid #334155;
-        border-radius: 8px;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
-        color: #F8FAFC;
-        font-family: 'Inter', system-ui, sans-serif;
-        font-size: 13px;
-        min-width: 200px;
-        max-width: 300px;
-        max-height: 200px;
-        overflow-y: auto;
-      `;
-      document.body.appendChild(this.popup);
+      this.popup.className = 'pp-snippet-popup';
+      shadow.appendChild(this.popup);
     }
 
     // Position near bottom right of target bounding rect
@@ -125,33 +177,31 @@ export class SnippetManager {
     this.popup.innerHTML = '';
     this.snippets.forEach((snippet) => {
       const item = document.createElement('div');
-      item.style.cssText = `padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #1E293B; display: flex; flex-direction: column;`;
-      item.onmouseover = () => (item.style.background = '#1E293B');
-      item.onmouseout = () => (item.style.background = 'transparent');
-      
+      item.className = 'pp-snippet-item';
+
       const title = document.createElement('span');
-      title.style.cssText = `font-weight: 600; color: #3B82F6; margin-bottom: 2px;`;
+      title.className = 'pp-snippet-title';
       title.textContent = snippet.prefix;
-      
+
       const desc = document.createElement('span');
-      desc.style.cssText = `color: #94A3B8; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;`;
+      desc.className = 'pp-snippet-desc';
       desc.textContent = snippet.description || snippet.body;
 
       item.appendChild(title);
       item.appendChild(desc);
-      
+
       item.onmousedown = (e) => {
         e.preventDefault();
         this.injectSnippet(snippet);
       };
-      
-      this.popup.appendChild(item);
+
+      this.popup!.appendChild(item);
     });
   }
 
   private injectSnippet(snippet: Snippet) {
     if (!this.activeElement) return;
-    
+
     let text = this.getText(this.activeElement);
     // Replace the last occurrence of the query with the snippet body
     const lastIdx = text.lastIndexOf(this.currentQuery);
